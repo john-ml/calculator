@@ -1,0 +1,12 @@
+body {
+  margin-left: 10%;
+  margin-right: 10%;
+  margin-top: 5%;
+}
+
+#input {
+  border: 1px solid #aaaaaa;
+  border-radius: 0.75em;
+  padding: 0.5em;
+  font-family: monospace;
+}

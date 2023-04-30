@@ -1,0 +1,56 @@
+<!doctype html>
+
+<head>
+  <style>
+    body {
+      margin-left: 10%;
+      margin-right: 10%;
+      margin-top: 5%;
+      margin-bottom: 5%;
+    }
+    #input {
+      border: 1px solid #aaaaaa;
+      border-radius: 0.75em;
+      padding: 0.5em;
+      font-family: monospace;
+    }
+    /* https://css-tricks.com/books/greatest-css-tricks/pin-scrolling-to-bottom/ */
+    #scroller * { overflow-anchor: none; }
+    #scroller { padding-bottom: 5%; }
+    #anchor { overflow-anchor: auto; height: 1px; }
+  </style>
+  <script>
+    const inputkeydown = (event) => {
+      if (event.key !== 'Enter') return;
+      fetch('input', {
+        method: 'POST',
+        headers: {'Accept': 'application/json', 'Content-Type': 'application/json'},
+        body: event.key
+      }).then(v => {
+        console.log('Got response', v);
+         (async () => {
+          let output = document.getElementById('output');
+          let html = '';
+          for await (const chunk of v.body)
+            html += new TextDecoder().decode(chunk);
+          console.log('Prepending', html, 'to output');
+          let div = document.createElement('div');
+          div.innerHTML += html;
+          output.appendChild(div);
+          output.appendChild(document.createElement('br'));
+        })();
+      });
+      document.getElementById('input').innerHTML = '';
+      return event.preventDefault();
+    }
+  </script>
+</head>
+<body>
+  <div id="scroller">
+    <div id="padding" style="height:100vh"></div>
+    <div id="output"></div>
+    <div contenteditable autofocus id="input" onkeydown="inputkeydown(event)"></div>
+    <div id="anchor"></div>
+  </div>
+  <script>window.scrollTo(0, document.body.scrollHeight);</script>
+</body>
