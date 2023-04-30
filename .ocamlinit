@@ -1,2 +1,0 @@
-let tek s = Unix.system @@ "python3 ~/git/tek/tek '" ^ s ^ "'"
-
