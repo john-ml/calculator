@@ -13,42 +13,62 @@
       padding: 0.5em;
       font-family: monospace;
     }
-    .output { font-family: monospace; }
+    .output {
+      font-family: monospace;
+      padding: 0.5em;
+    }
     /* https://css-tricks.com/books/greatest-css-tricks/pin-scrolling-to-bottom/ */
     #scroller * { overflow-anchor: none; }
     #anchor { overflow-anchor: auto; height: 1px; }
   </style>
   <script>
+    let history = [];
+    let history_cursor = 0;
     const inputkeydown = (event) => {
-      if (event.key !== 'Enter') return;
       let input = document.getElementById('input');
-      let command = input.innerHTML;
-      fetch('input', {
-        method: 'POST',
-        headers: {'Accept': 'application/json', 'Content-Type': 'application/json'},
-        body: command,
-      }).then(v => {
-        console.log('Got response', v);
-         (async () => {
-          let log = document.getElementById('log');
-          let html = '';
-          for await (const chunk of v.body)
-            html += new TextDecoder().decode(chunk);
-          console.log('Prepending', html, 'to output');
-          let commandDiv = document.createElement('div');
-          commandDiv.innerHTML = command;
-          commandDiv.className = 'input';
-          let outputDiv = document.createElement('div');
-          outputDiv.innerHTML += html;
-          outputDiv.className += 'output';
-          log.appendChild(commandDiv);
-          log.appendChild(document.createElement('br'));
-          log.appendChild(outputDiv);
-          log.appendChild(document.createElement('br'));
-        })();
-      });
-      input.innerHTML = '';
-      return event.preventDefault();
+      console.log(event.key);
+      switch (event.key) {
+        case 'ArrowUp': {
+          history_cursor = Math.max(0, history_cursor - 1);
+          if (history_cursor < history.length)
+            input.innerHTML = history[history_cursor];
+        } break;
+        case 'ArrowDown': {
+          history_cursor = Math.min(history.length, history_cursor + 1);
+          if (history_cursor < history.length)
+            input.innerHTML = history[history_cursor];
+        } break;
+        case 'Enter': {
+          let command = input.innerHTML;
+          history.push(command);
+          history_cursor = history.length;
+          fetch('input', {
+            method: 'POST',
+            headers: {'Accept': 'application/json', 'Content-Type': 'application/json'},
+            body: command,
+          }).then(v => {
+            console.log('Got response', v);
+            (async () => {
+              let log = document.getElementById('log');
+              let html = '';
+              for await (const chunk of v.body)
+                html += new TextDecoder().decode(chunk);
+              console.log('Prepending', html, 'to output');
+              let commandDiv = document.createElement('div');
+              commandDiv.innerHTML = command;
+              commandDiv.className = 'input';
+              let outputDiv = document.createElement('div');
+              outputDiv.innerHTML += html;
+              outputDiv.className += 'output';
+              log.appendChild(commandDiv);
+              log.appendChild(outputDiv);
+            })();
+          });
+          input.innerHTML = '';
+          return event.preventDefault();
+        } break;
+        default: break;
+      }
     }
   </script>
 </head>

@@ -1,6 +1,21 @@
 import flask as F
 from flask import Flask
 
+class Prog:
+  def __init__(self):
+    self.state = []
+
+  def on_input(self, cmds):
+    def go(stack, cmds):
+      match stack, cmds:
+        case stack, []:
+          self.state = stack
+          return stack
+        case [*stack, v, w], ['+', *cmds]: return go([*stack, v + w], cmds)
+        case [*stack, v, w], ['*', *cmds]: return go([*stack, v * w], cmds)
+        case stack, [c, *cmds]: return go([*stack, float(c)], cmds)
+    return str(go(self.state, cmds))
+
 def base64image(path):
   import base64
   with open(path, 'rb') as f:
@@ -11,6 +26,7 @@ def img(path):
   return f'<img src="data:image/png;base64,{base64image(path)}"></img>'
 
 app = Flask(__name__)   
+prog = Prog()
 
 @app.route('/', methods = ['GET'])
 def main():
@@ -22,17 +38,8 @@ def on_input():
   s = unescape(F.request.data.decode('utf-8'))
   if s.endswith('<br>'): s = s[:-len('<br>')]
   print('Received input:', s)
-  try:
-    def go(stack, cmds):
-      print(stack, cmds)
-      match stack, cmds:
-        case [h, *_], []: return h
-        case [v, w, *stack], ['+', *cmds]: return go([v + w, *stack], cmds)
-        case [v, w, *stack], ['*', *cmds]: return go([v * w, *stack], cmds)
-        case stack, [c, *cmds]: return go([float(c), *stack], cmds)
-    return str(go([], s.split()))
-  except:
-    return img('lfman.png')
+  try: return prog.on_input(s.split())
+  except: return img('lfman.png')
 
 if __name__ == '__main__':
   app.run()
