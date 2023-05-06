@@ -17,7 +17,7 @@ class Prog:
     return str(go(self.state, cmds))
 
   def tex(self, s):
-    return f'$\\displaystyle {s}$'
+    return f'{s}'
 
 def base64image(path):
   import base64
@@ -41,8 +41,8 @@ def on_input():
   s = unescape(F.request.data.decode('utf-8'))
   if s.endswith('<br>'): s = s[:-len('<br>')]
   print('Received input:', s)
-  # try: return prog.on_input(s.split())
-  try: return prog.tex(s)
+  try: return prog.on_input(s.split())
+  # try: return prog.tex(s)
   except: return img('lfman.png')
 
 if __name__ == '__main__':
