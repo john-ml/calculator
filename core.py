@@ -103,18 +103,45 @@ print(pretty(p))
 
 print(eval('pretty(p)'))
 
-# class Add(Term):
-#   p: Term
-#   land: '\\land'
-#   q: Term
-# Each field refers to the precedence of the cursor position immediately after it.
-# The special field 'Add' (or the name of the class in general) is used to refer
-# to the left-most cursor position.
-# For example, to specify right associativity, add inequality Add.land <= Add.
-# Luckily, despite being a dict, c.__annotations__ contains items in declaration order,
-# so class definitions like the above can be parsed as mixfix declarations.
-
+# ---------- Mixfix printing ----------
+#
+# A decorator @mixfix that gives mixfix precedence-based printing for dataclasses.
+#
+# For example, to declare an operator And(p, q) that pretty-prints as p + q:
+#   @mixfix
+#   class And:
+#     p: Term
+#     plus: str(' + ')
+#     q: Term
+# By default, precedence mismatches are mediated by inserting parentheses using
 def parens(s): return f'\\left({s}\\right)'
+# but one can specify a different 'bracketer' using the optional field 'bracket', e.g.
+#   @mixfix
+#   class Add:
+#     p: Term
+#     plus: str(' + ')
+#     q: Term
+#     bracket = lambda s: f'({s})'
+# to get ordinary parentheses instead of the LaTeX ones.
+
+# Precedences are declared as a partial ordering on 'cursor positions',
+# which correspond to positions in the string produced by pretty-printing.
+# Each field refers to the cursor position immediately after it in the
+# pretty-printed string; the class name ('Add' in this case) is used to refer to
+# the left-most cursor position. For example, visualizing the cursor position as |,
+#    Add        refers to   |p + q
+#    Add.p      refers to    p|+ q
+#    Add.plus   refers to    p +|q
+#    Add.q      refers to    p + q|
+# The pretty-printer uses the partial ordering on cursor positions to decide
+# which brackets can be omitted. For example, adding the inequality Add >
+# Add.plus specifies right associativity: it allows the brackets in
+#   p + (q + r)
+# to be omitted because the cursor position
+#   Add = |q + r
+# has higher precedence than the cursor position
+#   Add.plus = p +|(q+r)
+# TODO describe pretty-printing algorithm via incoming and outgoing precedences
 
 from poset import Poset
 global_prec_order = Poset().add_bot('bot').add_top('top')
@@ -126,9 +153,23 @@ def prec_ges(pqs):
 def prec_bot(p): global_prec_order.add_bot(to_prec(p))
 def prec_top(p): global_prec_order.add_top(to_prec(p))
 
+# Given a class declaration
+#   class C:
+#     x: tx
+#     y: str(s)
+#     z: tz
+#     etc
+# Generates a dataclass with
+# - fields x: t, z: tz, ... (fields with 'string literal type' omitted)
+# - method fresh(renaming) that freshens all bound variables (instances of the class F) in each field
+# - method pretty() that pretty-prints an instance of C, omitting brackets as allowed by the global precedence order
+# - class properties x, y, z, ... for referring to cursor positions denoted by these fields
+# - class property __match_args__ = ('x', 'z', ...) for pattern matching against instances of C
 def mixfix(c):
   name = c.__name__
   annotations = c.__annotations__
+  # Luckily, despite being a dict, c.__annotations__ contains items in declaration order,
+  # so the order of the mixfix operators is preserved
   fields = tuple(k for k, v in annotations.items() if type(v) is not str)
   def init(self, *args):
     assert len(fields) == len(args)
@@ -177,51 +218,76 @@ def mixfix(c):
     c.bracket = parens
   return c
 
-@mixfix
-class Top:
-  s: str('\\top ')
-prec_top(Top)
-prec_top(Top.s)
+# Example: precedence-based printing for simple types
+#   t ::= 1 | t + t | t * t | t -> t
+# where 
+#   +, *, and -> are all right associative
+#   * takes precedence over +
+#   + and * take precedence to the left of ->
+#   (Usually, + and * also take precedence to the right of -> too, but leaving
+#   it out just to show you can)
+if __name__ == '__main__':
+  simple_parens = lambda s: f'({s})'
 
-@mixfix
-class Times:
-  p: any
-  times: str('\\times ')
-  q: any
-prec_ge(Times, Times.times) # right associative
+  @mixfix
+  class Top:
+    s: str('1')
+    bracket = simple_parens
+  prec_top(Top)
+  prec_top(Top.s)
 
-@mixfix
-class Plus:
-  p: any
-  plus: str('+')
-  q: any
-prec_ge(Plus, Plus.plus) # right associative
-prec_ges([(Times, Plus), (Times.q, Plus.p), (Times.q, Plus.q)]) # multiplication > addition
+  @mixfix
+  class Times:
+    p: any
+    times: str(' * ')
+    q: any
+    bracket = simple_parens
+  prec_ge(Times, Times.times) # right associative
 
-@mixfix
-class Pow:
-  p: any
-  to: str('\\to ')
-  q: any
-prec_ge(Pow, Pow.to) # right associative
-prec_ges([(Plus, Pow), (Plus.q, Pow.p)]) # transitively also get p /\ q -> r w/o parens
+  @mixfix
+  class Plus:
+    p: any
+    plus: str(' + ')
+    q: any
+    bracket = simple_parens
+  prec_ge(Plus, Plus.plus) # right associative
+  prec_ges([(Times, Plus), (Times.q, Plus.p), (Times.q, Plus.q)]) # * takes precedence over +
 
-print(Times.__name__)
-match Times(Top(), Top()):
-  case Times(p, q): print(p, q)
+  @mixfix
+  class Pow:
+    p: any
+    to: str(' -> ')
+    q: any
+    bracket = simple_parens
+  prec_ge(Pow, Pow.to) # right associative
+  prec_ges([(Plus, Pow), (Plus.q, Pow.p)]) # + takes precedence on left of ->
+  # Note: by transitivity, also get that * takes precedence on left of ->.
 
-print(Times(Top(), Top()).pretty())
-print(Times(Top(), Times(Top(), Top())).pretty())
-print(Times(Times(Top(), Top()), Top()).pretty())
-print()
-print(Times(Top(), Plus(Top(), Top())).pretty())
-print(Times(Plus(Top(), Top()), Top()).pretty())
-print()
-print(Plus(Top(), Times(Top(), Top())).pretty())
-print(Plus(Times(Top(), Top()), Top()).pretty())
-print()
-print(Pow(Top(), Pow(Top(), Top())).pretty())
-print(Pow(Pow(Top(), Top()), Top()).pretty())
-print()
-print(Pow(Times(Top(), Top()), Top()).pretty())
-print(Pow(Plus(Top(), Top()), Top()).pretty())
+  def expect(want, have):
+    if want != have:
+      raise Exception(f'\nWant: {want}\nHave: {have}')
+
+  # \top requires no bracketing
+  expect('1 * 1', Times(Top(), Top()).pretty())
+  # \times is right-associative
+  expect('1 * 1 * 1', Times(Top(), Times(Top(), Top())).pretty())
+  expect('(1 * 1) * 1', Times(Times(Top(), Top()), Top()).pretty())
+  # + is right-associative
+  expect('1 + 1 + 1', Plus(Top(), Plus(Top(), Top())).pretty())
+  expect('(1 + 1) + 1', Plus(Plus(Top(), Top()), Top()).pretty())
+  # * takes precedence over +
+  expect('1 * (1 + 1)', Times(Top(), Plus(Top(), Top())).pretty())
+  expect('(1 + 1) * 1', Times(Plus(Top(), Top()), Top()).pretty())
+  expect('1 + 1 * 1', Plus(Top(), Times(Top(), Top())).pretty())
+  expect('1 * 1 + 1', Plus(Times(Top(), Top()), Top()).pretty())
+  # -> is right-associative
+  expect('1 -> 1 -> 1', Pow(Top(), Pow(Top(), Top())).pretty())
+  expect('(1 -> 1) -> 1', Pow(Pow(Top(), Top()), Top()).pretty())
+  # * and + take precedence over -> on left
+  expect('1 * 1 -> 1', Pow(Times(Top(), Top()), Top()).pretty())
+  expect('1 * (1 -> 1)', Times(Top(), Pow(Top(), Top)).pretty())
+  expect('1 + 1 -> 1', Pow(Plus(Top(), Top()), Top()).pretty())
+  expect('1 + (1 -> 1)', Plus(Top(), Pow(Top(), Top())).pretty())
+  # * and + do NOT take precedence over -> on right
+  expect('1 -> (1 * 1)', Pow(Top(), Times(Top(), Top())).pretty())
+  expect('1 -> (1 + 1)', Pow(Top(), Plus(Top(), Top())).pretty())
