@@ -105,7 +105,7 @@ print(eval('pretty(p)'))
 
 # ---------- Mixfix printing ----------
 #
-# A decorator @mixfix that gives mixfix precedence-based printing for dataclasses.
+# The decorator @mixfix adds mixfix precedence-based printing for dataclasses.
 #
 # For example, to declare an operator And(p, q) that pretty-prints as p + q:
 #   @mixfix
@@ -267,9 +267,9 @@ if __name__ == '__main__':
     if want != have:
       raise Exception(f'\nWant: {want}\nHave: {have}')
 
-  # \top requires no bracketing
+  # 1 requires no bracketing
   expect('1 * 1', Times(Top(), Top()).pretty())
-  # \times is right-associative
+  # * is right-associative
   expect('1 * 1 * 1', Times(Top(), Times(Top(), Top())).pretty())
   expect('(1 * 1) * 1', Times(Times(Top(), Top()), Top()).pretty())
   # + is right-associative
