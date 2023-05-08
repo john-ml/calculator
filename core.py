@@ -123,6 +123,7 @@ def mixfix(c):
 
 # ---------- Abstract binding trees ----------
 
+# For fresh name generation
 def nats():
   n = 0
   while True:
@@ -130,6 +131,9 @@ def nats():
     n += 1
 global_nats = nats()
 
+# Names are represented as pairs (x:str, n:nat).
+# - x is the 'pretty name', usually specified by the user
+# - n is a disambiguator used to ensure that bound variables are globally fresh
 class Name:
   def __init__(self, x, n=None):
     self.x = x
@@ -141,6 +145,8 @@ class Name:
   def fresh(self): return Name(self.x, next(global_nats))
   def with_n(self, n): return Name(self.x, n)
 
+# An occurrence of a variable name.
+# Usually not invoked explicitly; see F below.
 class V:
   __match_args__ = ('x',)
   def __init__(self, x): self.x = x
@@ -151,6 +157,10 @@ class V:
   def simple_names(self, renaming={}, renaming_used=set()): return V(renaming[self.x]) if self.x in renaming else self
   def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order): return str(self.x)
 
+# A binder.
+# F('x', lambda x: e[x]) represents a term e with free variable x.
+# Desugars to F(Name('x', n), e[V(Name('x', n))]) with n fresh.
+# Pattern matching against an instance of F produces [x:Name, e:term] with x fresh.
 class F:
   __match_args__ = ('unwrap',)
   def __init__(self, x, f, raw=False):
