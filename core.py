@@ -5,17 +5,17 @@
 # For example, to declare an operator And(p, q) that pretty-prints as p + q:
 #   @mixfix
 #   class And:
-#     p: Term
+#     p: any
 #     plus: str(' + ')
-#     q: Term
+#     q: any
 # By default, precedence mismatches are mediated by inserting parentheses using
 def parens(s): return f'\\left({s}\\right)'
 # but one can specify a different 'bracketer' using the optional field 'bracket', e.g.
 #   @mixfix
 #   class Add:
-#     p: Term
+#     p: any
 #     plus: str(' + ')
-#     q: Term
+#     q: any
 #     bracket = lambda s: f'({s})'
 # to get ordinary parentheses instead of the LaTeX ones.
 
@@ -48,21 +48,23 @@ def prec_ges(pqs):
 def prec_bot(p): global_prec_order.add_bot(to_prec(p))
 def prec_top(p): global_prec_order.add_top(to_prec(p))
 
-# Given a class declaration
-#   class C:
-#     x: tx
-#     y: str(s)
-#     z: tz
-#     etc
-# Generates a dataclass with
-# - fields x: t, z: tz, ... (fields with 'string literal type' omitted)
-# - method fresh(renaming) that freshens all bound variables (instances of the class F) in each field
-# - method subst(**substitution) that applies the given substitution
-# - method simple_names(renaming, renaming_used) that maximally simplifies disambiguators on bound variable names
-# - method pretty() that pretty-prints an instance of C, omitting brackets as allowed by the global precedence order
-# - class properties x, y, z, ... for referring to cursor positions denoted by these fields
-# - class property __match_args__ = ('x', 'z', ...) for pattern matching against instances of C
 def mixfix(c):
+  '''
+  Given a class declaration
+    class C:
+      x: tx
+      y: str(s)
+      z: tz
+      etc
+  Generates a dataclass with
+  - fields x: t, z: tz, ... (fields with 'string literal type' omitted)
+  - method fresh(renaming) that freshens all bound variables (instances of the class F) in each field
+  - method subst(**substitution) that applies the given substitution
+  - method simple_names(renaming, renaming_used) that maximally simplifies disambiguators on bound variable names
+  - method pretty() that pretty-prints an instance of C, omitting brackets as allowed by the global precedence order
+  - class properties x, y, z, ... for referring to cursor positions denoted by these fields
+  - class property __match_args__ = ('x', 'z', ...) for pattern matching against instances of C
+  '''
   name = c.__name__
   annotations = c.__annotations__
   # Luckily, despite being a dict, c.__annotations__ contains items in declaration order,
@@ -123,7 +125,6 @@ def mixfix(c):
 
 # ---------- Abstract binding trees ----------
 
-# For fresh name generation
 def nats():
   n = 0
   while True:
@@ -131,10 +132,12 @@ def nats():
     n += 1
 global_nats = nats()
 
-# Names are represented as pairs (x:str, n:nat).
-# - x is the 'pretty name', usually specified by the user
-# - n is a disambiguator used to ensure that bound variables are globally fresh
 class Name:
+  '''
+  Names are represented as pairs (x:str, n:nat).
+  - x is the 'pretty name', usually specified by the user
+  - n is a disambiguator used to ensure that bound variables are globally fresh
+  '''
   def __init__(self, x, n=None):
     self.x = x
     self.n = n
@@ -145,9 +148,11 @@ class Name:
   def fresh(self): return Name(self.x, next(global_nats))
   def with_n(self, n): return Name(self.x, n)
 
-# An occurrence of a variable name.
-# Usually not invoked explicitly; see F below.
 class V:
+  '''
+  An occurrence of a variable name.
+  Usually not invoked explicitly; see F below.
+  '''
   __match_args__ = ('x',)
   def __init__(self, x): self.x = x
   def __eq__(self, other): return self.x == other.x
@@ -157,11 +162,13 @@ class V:
   def simple_names(self, renaming={}, renaming_used=set()): return V(renaming[self.x]) if self.x in renaming else self
   def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order): return str(self.x)
 
-# A binder.
-# F('x', lambda x: e[x]) represents a term e with free variable x.
-# Desugars to F(Name('x', n), e[V(Name('x', n))]) with n fresh.
-# Pattern matching against an instance of F produces [x:Name, e:term] with x fresh.
 class F:
+  '''
+  A binder.
+  F('x', lambda x: e[x]) represents a term e with free variable x.
+  Desugars to F(Name('x', n), e[V(Name('x', n))]) with n fresh.
+  Pattern matching against an instance of F produces [x:Name, e:term] with x fresh.
+  '''
   __match_args__ = ('unwrap',)
   def __init__(self, x, f, raw=False):
     if raw:
