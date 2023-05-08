@@ -83,10 +83,11 @@ def mixfix(c):
   - fields x: t, z: tz, ... (fields with 'string literal type' omitted)
   - method fresh(renaming) that freshens all bound variables (instances of the class F) in each field
   - method subst(**substitution) that applies the given substitution
-  - method simple_names(renaming, renaming_used) that maximally simplifies disambiguators on bound variable names
+  - method simple_names(renaming, in_use) that maximally simplifies disambiguators on bound variable names
   - method fvs() that produces the free variables of an instance of C
   - method pretty() that pretty-prints an instance of C, omitting brackets as allowed by the global precedence order
   - method __repr__() that prints an instance of C for debugging
+  - method __eq__() that tests equality up to renaming of bound variables
   - class properties x, y, z, ... for referring to cursor positions denoted by these fields
   - class property __match_args__ = ('x', 'z', ...) for pattern matching against instances of C
   '''
@@ -104,14 +105,16 @@ def mixfix(c):
     return self.__class__(*(getattr(self, k).fresh(renaming) for k in fields))
   def subst(self, substitution):
     return self.__class__(*(getattr(self, k).subst(substitution) for k in fields))
-  def simple_names(self, renaming={}, renaming_used=set()):
-    return self.__class__(*(getattr(self, k).simple_names(renaming, renaming_used) for k in fields))
+  def simple_names(self, renaming={}, in_use=set()):
+    return self.__class__(*(getattr(self, k).simple_names(renaming, in_use) for k in fields))
   def fvs(self):
     # print(self, [(getattr(self, k), type(getattr(self, k))) for k in fields])
     return set(x for k in fields for x in getattr(self, k).fvs())
   def __repr__(self):
     args = ','.join(repr(getattr(self, k)) for k in fields)
     return f'{name}({args})'
+  def __eq__(self, other, renaming={}):
+    return all(getattr(self, k).__eq__(getattr(other, k), renaming) for k in fields)
   def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
     def make_prec(field_name): return f'{name}.{field_name}' if field_name != name else name
     left_prec_inner = name
@@ -138,6 +141,7 @@ def mixfix(c):
   c.__init__ = __init__
   c.__match_args__ = fields
   c.__repr__ = __repr__
+  c.__eq__ = __eq__
   c.fresh = fresh
   c.subst = subst
   c.simple_names = simple_names
@@ -162,7 +166,7 @@ class Name:
   '''
   Names are represented as pairs (x:str, n:nat).
   - x is the 'pretty name', usually specified by the user
-  - n is a disambiguator used to ensure that bound variables are globally fresh
+  - n is a disambiguator used to ensure that bound variables are never shadowed
   '''
   def __init__(self, x, n=None):
     self.x = x
@@ -181,11 +185,11 @@ class V:
   '''
   __match_args__ = ('x',)
   def __init__(self, x): self.x = x
-  def __eq__(self, other): return self.x == other.x
+  def __eq__(self, other, renaming={}): return renaming[self.x] == other.x if self.x in renaming else self.x == other.x
   def __repr__(self): return f'V({repr(self.x)})'
   def fresh(self, renaming): return V(renaming[self.x]) if self.x in renaming else self
   def subst(self, substitution): return substitution[self.x] if self.x in substitution else self
-  def simple_names(self, renaming={}, renaming_used=set()): return V(renaming[self.x]) if self.x in renaming else self
+  def simple_names(self, renaming={}, in_use=set()): return V(renaming[self.x]) if self.x in renaming else self
   def fvs(self): return {self.x}
   def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order): return str(self.x)
 
@@ -208,6 +212,9 @@ class F:
 
   def __repr__(self):
     return f'F([{repr(self.x)}, {repr(self.e)}])'
+  
+  def __eq__(self, other, renaming={}):
+    return type(other) is F and self.e.__eq__(other.e, renaming | {self.x: other.x})
 
   def fresh(self, renaming):
     x = self.x.fresh()
@@ -219,12 +226,12 @@ class F:
     e = self.e.subst(substitution | {self.x: V(x)})
     return F([x, e])
 
-  def simple_names(self, renaming={}, renaming_used=set()):
+  def simple_names(self, renaming={}, in_use=set()):
     x = (
-      self.x.with_n(None) if self.x.with_n(None) not in renaming_used else
-      next(self.x.with_n(n) for n in nats() if self.x.with_n(n) not in renaming_used)
+      self.x.with_n(None) if self.x.with_n(None) not in in_use else
+      next(self.x.with_n(n) for n in nats() if self.x.with_n(n) not in in_use)
     )
-    e = self.e.simple_names(renaming | {self.x: x}, renaming_used | {x})
+    e = self.e.simple_names(renaming | {self.x: x}, in_use | {x})
     return F([x, e])
 
   def fvs(self):
@@ -342,6 +349,13 @@ if __name__ == '__main__':
   p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
   expect('forall x@0. exists y@1. x@0 = y@1', p.pretty())
   expect('forall x. exists y. x = y', p.simple_names().pretty())
+
+  # Equality up to renaming
+  mxy = Forall(F('x', lambda x: Forall(F('y', lambda y: Eq(x, y)))))
+  muv = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(u, v)))))
+  muv_flip = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(v, u)))))
+  expect(True, mxy == muv)
+  expect(False, mxy == muv_flip)
 
   # Example 3: pattern matching on ABTs
 
