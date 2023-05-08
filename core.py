@@ -84,16 +84,19 @@ def mixfix(c):
   - method fresh(renaming) that freshens all bound variables (instances of the class F) in each field
   - method subst(**substitution) that applies the given substitution
   - method simple_names(renaming, renaming_used) that maximally simplifies disambiguators on bound variable names
+  - method fvs() that produces the free variables of an instance of C
   - method pretty() that pretty-prints an instance of C, omitting brackets as allowed by the global precedence order
+  - method __repr__() that prints an instance of C for debugging
   - class properties x, y, z, ... for referring to cursor positions denoted by these fields
   - class property __match_args__ = ('x', 'z', ...) for pattern matching against instances of C
   '''
   name = c.__name__
   annotations = c.__annotations__
+  assert len(annotations) != 0
   # Luckily, despite being a dict, c.__annotations__ contains items in declaration order,
   # so the order of the mixfix operators is preserved
   fields = tuple(k for k, v in annotations.items() if type(v) is not str)
-  def init(self, *args):
+  def __init__(self, *args):
     assert len(fields) == len(args)
     for k, arg in zip(fields, args):
       setattr(self, k, arg)
@@ -103,42 +106,42 @@ def mixfix(c):
     return self.__class__(*(getattr(self, k).subst(substitution) for k in fields))
   def simple_names(self, renaming={}, renaming_used=set()):
     return self.__class__(*(getattr(self, k).simple_names(renaming, renaming_used) for k in fields))
+  def fvs(self):
+    # print(self, [(getattr(self, k), type(getattr(self, k))) for k in fields])
+    return set(x for k in fields for x in getattr(self, k).fvs())
+  def __repr__(self):
+    args = ','.join(repr(getattr(self, k)) for k in fields)
+    return f'{name}({args})'
   def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
-    def cons(x, g):
-      yield x
-      yield from g
     def make_prec(field_name): return f'{name}.{field_name}' if field_name != name else name
+    left_prec_inner = name
+    right_prec_inner = make_prec(tuple(annotations.items())[-1][0]) # OK because annotations nonempty
+    # print(prec_order.graph)
+    # print(f'comparing {left_prec} <= {left_prec_inner} and {right_prec} <= {right_prec_inner} gives {prec_order.le(left_prec, left_prec_inner)} and {prec_order.le(right_prec, right_prec_inner)} = {prec_order.le(left_prec, left_prec_inner) and prec_order.le(right_prec, right_prec_inner)}')
+    bracketing = not (prec_order.le(left_prec, left_prec_inner) and prec_order.le(right_prec, right_prec_inner))
+    # (name of cursor position used to recur, corresponding field or None, string to append to output) for each entry in mixfix declaration
+    precs = [('bot' if bracketing else name, None, '')] + list((make_prec(k), None if type(v) is str else k, v) for (k, v) in annotations.items())
+    if bracketing:
+      precs[-1] = ('bot', precs[-1][1], precs[-1][2])
     # Compute left and right prec for each item
-    # print(list(
-    #   (make_prec(j), make_prec(k), (k, v))
-    #   for (j, _), (k, v) in zip(cons((name, ''), annotations.items()), annotations.items())
-    # ))
     items = (
-      (make_prec(j), make_prec(k), (k, v))
-      for (j, _), (k, v) in zip(cons((name, ''), annotations.items()), annotations.items())
+      (l, (k, v), r)
+      for (l, _, _), (r, k, v) in zip(precs, precs[1:])
     )
     res = ''
-    for (left_prec_inner, right_prec_inner, (k, v)) in items:
-      if type(v) is str:
-        res += v
-      else:
+    for (left_prec_inner, (k, v), right_prec_inner) in items:
+      if k is not None:
         res += getattr(self, k).pretty(left_prec_inner, right_prec_inner, prec_order)
-    if len(annotations) == 0: return res
-    else:
-      left_prec_inner = name
-      right_prec_inner = make_prec(tuple(annotations.items())[-1][0])
-      # print(f'res = {res}')
-      # print(prec_order.graph)
-      # print(f'comparing {left_prec} <= {left_prec_inner} and {right_prec} <= {right_prec_inner} gives {prec_order.le(left_prec, left_prec_inner)} and {prec_order.le(right_prec, right_prec_inner)} = {prec_order.le(left_prec, left_prec_inner) and prec_order.le(right_prec, right_prec_inner)}')
-      if prec_order.le(left_prec, left_prec_inner) and prec_order.le(right_prec, right_prec_inner):
-        return res
       else:
-        return self.__class__.bracket(res)
-  c.__init__ = init
+        res += v
+    return self.__class__.bracket(res) if bracketing else res
+  c.__init__ = __init__
   c.__match_args__ = fields
+  c.__repr__ = __repr__
   c.fresh = fresh
   c.subst = subst
   c.simple_names = simple_names
+  c.fvs = fvs
   c.pretty = pretty
   for k in annotations:
     setattr(c, k, f'{name}.{k}')
@@ -183,19 +186,22 @@ class V:
   def fresh(self, renaming): return V(renaming[self.x]) if self.x in renaming else self
   def subst(self, substitution): return substitution[self.x] if self.x in substitution else self
   def simple_names(self, renaming={}, renaming_used=set()): return V(renaming[self.x]) if self.x in renaming else self
+  def fvs(self): return {self.x}
   def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order): return str(self.x)
 
 class F:
   '''
-  A binder.
-  F('x', lambda x: e[x]) represents a term e with free variable x.
-  Constructs a value F(Name('x', n), e[V(Name('x', n))]) with n fresh.
+  A binding form. There are two ways to construct instances of F:
+  - F('x', lambda x: e[x]) represents a term e with free variable x.
+    Constructs a value F(Name('x', n), e[V(Name('x', n))]) with n fresh.
+  - F([x:Name, e]) represents a term e with free variable x.
+    Does not do any freshening.
   Pattern matching against an instance of F produces [x:Name, e:term] with x fresh.
   '''
   __match_args__ = ('unwrap',)
-  def __init__(self, x, f, raw=False):
-    if raw:
-      [self.x, self.e] = [x, f]
+  def __init__(self, x, f=None):
+    if f is None:
+      [self.x, self.e] = x
     else:
       self.x = Name(x).fresh()
       self.e = f(V(self.x))
@@ -206,12 +212,12 @@ class F:
   def fresh(self, renaming):
     x = self.x.fresh()
     e = self.e.fresh(renaming | {self.x: x})
-    return F(x, e, raw=True)
+    return F([x, e])
 
   def subst(self, substitution):
     x = self.x.fresh()
     e = self.e.subst(substitution | {self.x: V(x)})
-    return F(x, e, raw=True)
+    return F([x, e])
 
   def simple_names(self, renaming={}, renaming_used=set()):
     x = (
@@ -219,7 +225,10 @@ class F:
       next(self.x.with_n(n) for n in nats() if self.x.with_n(n) not in renaming_used)
     )
     e = self.e.simple_names(renaming | {self.x: x}, renaming_used | {x})
-    return F(x, e, raw=True)
+    return F([x, e])
+
+  def fvs(self):
+    return self.e.fvs() - {self.x}
 
   def get_unwrap(self):
     e = self.fresh({})
@@ -231,8 +240,10 @@ class F:
   def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
     return f"{str(self.x)}. {self.e.pretty('bot', right_prec, prec_order)}"
 
+# ---------- Examples ----------
+
 if __name__ == '__main__':
-  # Example: precedence-based printing for simple types
+  # Example 1: precedence-based printing for simple types
   #   t ::= 1 | t + t | t * t | t -> t
   # where 
   #   +, *, and -> are all right associative
@@ -306,34 +317,108 @@ if __name__ == '__main__':
   expect('1 -> (1 * 1)', Pow(Top(), Times(Top(), Top())).pretty())
   expect('1 -> (1 + 1)', Pow(Top(), Plus(Top(), Top())).pretty())
 
-  # Example: extending the language with quantifiers
+  # Example 2: extending the language with quantifiers
 
   @mixfix
   class Forall:
     forall: str('forall ')
     xp: F
+    bracket = simple_parens
   @mixfix
   class Exists:
     forall: str('exists ')
     xp: F
+    bracket = simple_parens
   prec_ges([(Forall.xp, Exists.xp), (Exists.xp, Forall.xp)])
   @mixfix
   class Eq:
     m: any
     eq: str(' = ')
     n: any
-  prec_ge(Eq.n, Exists.xp) # by transitivity, Eq.n >= Exists.xp
-
-  # def pretty(p):
-  #   match p:
-  #     case Eq(m, n): return f'({pretty(m)} = {pretty(n)})'
-  #     case V(x): return f'{x}'
-  #     case Forall(F([x, p])): return f'\\forall {x}. {pretty(p)}'
-  #     case Exists(F([x, p])): return f'\\exists {x}. {pretty(p)}'
-  #     case _:
-  #       print(p)
-  #       assert False
+    bracket = simple_parens
+  prec_ge(Eq.n, Exists.xp) # by transitivity, Eq.n >= Forall.xp
+  prec_ge(Times.q, Exists.xp)
 
   p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
   expect('forall x@0. exists y@1. x@0 = y@1', p.pretty())
   expect('forall x. exists y. x = y', p.simple_names().pretty())
+
+  # Example 3: pattern matching on ABTs
+
+  def simplify(p):
+    match p:
+      case Eq(m, n): return Top() if m == n else Eq(simplify(m), simplify(n))
+      case V(x): return V(x)
+      case Forall(F([x, p])):
+        p = simplify(p)
+        if x not in p.fvs(): return p
+        else: return Forall(F([x, p]))
+      case Exists(F([x, p])):
+        p = simplify(p)
+        if x not in p.fvs(): return p
+        else: return Exists(F([x, p]))
+      case Plus(p, q): return Plus(simplify(p), simplify(q))
+      case Times(p, q):
+        match simplify(p), simplify(q):
+          case Top(), Top(): return Top()
+          case Top(), q: return q
+          case p, Top(): return p
+          case p, q: return Times(p, q)
+      case Pow(p, q): return Pow(simplify(p), simplify(q))
+      case _:
+        print(p)
+        assert False
+
+  p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y))))))))
+  expect(set(), p.fvs())
+  expect('forall x. forall y. exists z. (y = y) * (x = y)', p.simple_names().pretty())
+  p = simplify(p)
+  expect('forall x. forall y. x = y', p.simple_names().pretty())
+
+  # Example 4: untyped LC
+
+  @mixfix
+  class Lam:
+    lam: str('\\')
+    m: F
+    bracket = simple_parens
+  @mixfix
+  class App:
+    m: any
+    app: str(' ')
+    n: any
+    bracket = simple_parens
+  prec_ge(App.n, App.m) # left-associative
+
+  # Check printing of function applications
+  id = Lam(F('x', lambda x: x))
+  expect(r'(\x. x) ((\x. x) (\x. x))', App(id, App(id, id)).simple_names().pretty())
+  expect(r'(\x. x) (\x. x) (\x. x)', App(App(id, id), id).simple_names().pretty())
+
+  # One-step CBN reduction
+  class Stuck(Exception): pass
+  def step(m):
+    match m:
+      case Lam(F([x, m])): return Lam(F([x, step(m)]))
+      case App(Lam(F([x, m])), n): return m.subst({x: n})
+      case App(m, n):
+        try: return App(step(m), n)
+        except Stuck: return App(m, step(n))
+      case V(x): raise Stuck()
+
+  expect(r'\x. x', step(App(id, id)).simple_names().pretty())
+
+  # Check capture-avoiding substitution on \y. (\x. \y. x) y
+  k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
+  v = lambda y: y
+  m = Lam(F('y', lambda y: App(k(y), v(y))))
+  expect(r'\y. ((\x. \y@0. x) y)', m.simple_names().pretty())
+  m = step(m)
+  expect(r'\y. \y@0. y', m.simple_names().pretty())
+
+  # Omega Omega -> Omega Omega
+  omega = Lam(F('x', lambda x: App(x, x)))
+  omega2 = App(omega, omega)
+  expect(r'(\x. x x) (\x. x x)', omega2.simple_names().pretty())
+  omega2 = step(omega2)
+  expect(r'(\x. x x) (\x. x x)', omega2.simple_names().pretty())
