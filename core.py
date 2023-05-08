@@ -1,42 +1,6 @@
 # ---------- Mixfix printing ----------
-#
-# The decorator @mixfix adds mixfix precedence-based printing for dataclasses.
-#
-# For example, to declare an operator And(p, q) that pretty-prints as p + q:
-#   @mixfix
-#   class And:
-#     p: any
-#     plus: str(' + ')
-#     q: any
-# By default, precedence mismatches are mediated by inserting parentheses using
-def parens(s): return f'\\left({s}\\right)'
-# but one can specify a different 'bracketer' using the optional field 'bracket', e.g.
-#   @mixfix
-#   class Add:
-#     p: any
-#     plus: str(' + ')
-#     q: any
-#     bracket = lambda s: f'({s})'
-# to get ordinary parentheses instead of the LaTeX ones.
 
-# Precedences are declared as a partial ordering on 'cursor positions',
-# which correspond to positions in the string produced by pretty-printing.
-# Each field refers to the cursor position immediately after it in the
-# pretty-printed string; the class name ('Add' in this case) is used to refer to
-# the left-most cursor position. For example, visualizing the cursor position as |,
-#    Add        refers to   |p + q
-#    Add.p      refers to    p|+ q
-#    Add.plus   refers to    p +|q
-#    Add.q      refers to    p + q|
-# The pretty-printer uses the partial ordering on cursor positions to decide
-# which brackets can be omitted. For example, adding the inequality Add >
-# Add.plus specifies right associativity: it allows the brackets in
-#   p + (q + r)
-# to be omitted because the cursor position
-#   Add = |q + r
-# has higher precedence than the cursor position
-#   Add.plus = p +|(q+r)
-# TODO describe pretty-printing algorithm via incoming and outgoing precedences
+def parens(s): return f'\\left({s}\\right)'
 
 from poset import Poset
 global_prec_order = Poset().add_bot('bot').add_top('top')
@@ -50,6 +14,64 @@ def prec_top(p): global_prec_order.add_top(to_prec(p))
 
 def mixfix(c):
   '''
+  The decorator @mixfix adds mixfix precedence-based printing to dataclasses.
+  
+  For example, to declare an operator And(p, q) that pretty-prints as p + q:
+    @mixfix
+    class And:
+      p: any
+      plus: str(' + ')
+      q: any
+  By default, precedence mismatches are mediated by inserting parentheses using
+  parens(), but one can specify a different 'bracketer' using the optional field
+  'bracket', e.g.
+    @mixfix
+    class Add:
+      p: any
+      plus: str(' + ')
+      q: any
+      bracket = lambda s: f'({s})'
+  to get ordinary parentheses instead of the LaTeX ones.
+
+  Precedences are declared as a partial ordering on 'cursor positions', which
+  correspond to positions in the string produced by pretty-printing. Each field
+  refers to the cursor position immediately after it in the pretty-printed
+  string; the class name ('Add' in this case) is used to refer to the left-most
+  cursor position. For example, visualizing the cursor position as |,
+    Add        refers to   |p + q
+    Add.p      refers to    p|+ q
+    Add.plus   refers to    p +|q
+    Add.q      refers to    p + q|
+  The pretty-printer uses the partial ordering on cursor positions to decide
+  which brackets can be omitted. It works as follows: each recursive call on
+  subterm Add(x,y) additionally receives the names of the cursor positions to
+  the left and right of Add(x,y) from the caller's perspective. (Initially,
+  these names are 'bot', the bottom element of the partial ordering on cursor
+  positions.) After pretty-printing Add(x,y) to a string, the names of the
+  cursor positions to the left and right of Add(x,y) from Add's perspective (in
+  this case Add and Add.q) are used to decide whether or not brackets can be
+  omitted. Specifically, if inner_l and inner_r denote the names of the cursor
+  positions from F's perspective, and incoming_l and incoming_r denote the names
+  from the caller's perspective, then brackets can be omitted exactly when
+    inner_l >= incoming_l  and  inner_r >= incoming_r
+  in the partial ordering of cursor positions.
+
+  For example, the inequality Add >= Add.plus specifies right associativity: it
+  allows the brackets in
+    p + (q + r)
+  to be omitted because the cursor position
+    Add = |q + r
+  has higher precedence than the cursor position
+    Add.plus = p +|(q+r)
+  Explicitly, at the recursive call on q+r, we have
+    incoming_l = Add.plus
+    incoming_r = Add.q
+    inner_l = Add
+    inner_r = Add.q
+  and the brackets can be omitted because
+    Add >= Add.plus  and  Add.q >= Add.q
+  evaluates to True.
+
   Given a class declaration
     class C:
       x: tx
@@ -151,7 +173,7 @@ class Name:
 class V:
   '''
   An occurrence of a variable name.
-  Usually not invoked explicitly; see F below.
+  Usually not used to construct variables explicitly; see help(F).
   '''
   __match_args__ = ('x',)
   def __init__(self, x): self.x = x
@@ -166,7 +188,7 @@ class F:
   '''
   A binder.
   F('x', lambda x: e[x]) represents a term e with free variable x.
-  Desugars to F(Name('x', n), e[V(Name('x', n))]) with n fresh.
+  Constructs a value F(Name('x', n), e[V(Name('x', n))]) with n fresh.
   Pattern matching against an instance of F produces [x:Name, e:term] with x fresh.
   '''
   __match_args__ = ('unwrap',)
@@ -303,9 +325,6 @@ if __name__ == '__main__':
 
   # def pretty(p):
   #   match p:
-  #     case And(p, q): return f'({pretty(p)} \\land {pretty(q)})'
-  #     case Or(p, q): return f'({pretty(p)} \\lor {pretty(q)})'
-  #     case Implies(p, q): return f'({pretty(p)} \\to {pretty(q)})'
   #     case Eq(m, n): return f'({pretty(m)} = {pretty(n)})'
   #     case V(x): return f'{x}'
   #     case Forall(F([x, p])): return f'\\forall {x}. {pretty(p)}'
