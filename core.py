@@ -49,10 +49,11 @@ def mixfix(c):
   these names are 'bot', the bottom element of the partial ordering on cursor
   positions.) After pretty-printing Add(x,y) to a string, the names of the
   cursor positions to the left and right of Add(x,y) from Add's perspective (in
-  this case Add and Add.q) are used to decide whether or not brackets can be
-  omitted. Specifically, if inner_l and inner_r denote the names of the cursor
-  positions from F's perspective, and incoming_l and incoming_r denote the names
-  from the caller's perspective, then brackets can be omitted exactly when
+  this case Add and Add.q) are compared against the incoming cursor positions to
+  decide whether or not brackets can be omitted. Specifically, if inner_l and
+  inner_r denote the names of the cursor positions from F's perspective, and
+  incoming_l and incoming_r denote the names from the caller's perspective, then
+  brackets can be omitted when
     inner_l >= incoming_l  and  inner_r >= incoming_r
   in the partial ordering of cursor positions.
 
