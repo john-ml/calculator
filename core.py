@@ -1,3 +1,6 @@
+DEBUG = False
+debug = print if DEBUG else (lambda *xs: None)
+
 # ---------- Mixfix printing ----------
 
 def parens(s): return f'\\left({s}\\right)'
@@ -33,19 +36,22 @@ def make_parser():
   # Annoyingly, lark nonterminals must contain only lowercase letters.
   # So munge class names to fit this format. Assumes no class names contain _
   def classname_to_nt(s): return 'c' + ''.join('_' + c.lower() if c.isupper() else c for c in s)
-  def nt_to_classname(s): return ''.join('' if c is '_' else c.upper() if prev is '_' else c for (prev, c) in zip(s[1:], s[2:]))
+  def nt_to_classname(s): return ''.join('' if c == '_' else c.upper() if prev == '_' else c for (prev, c) in zip(s[1:], s[2:]))
   # The grammar is stored as a list of productions on a single nonterminal
   # 'term'. A production like
   #   term -> term + term
   # for a mixfix constructor C is represented as the tuple
   #   (C, [None, "+", None])
   def make_grammar(ps):
+    # TODO could construct the grammar more intelligently using the precedence
+    # poset so there are fewer ambiguities to deal with
     escape = lambda s: f'"{repr(s)[1:-1]}"'
     lines = ''.join(
       f'\n      | {" ".join("term" if s is None else escape(s) for s in p)} -> {classname_to_nt(c.__name__)}' for c, p in ps
     )
     return f'''
       ?term : atom{lines}
+      | "(" term ")"
   
       ?atom : CNAME -> identifier
       | ESCAPED_STRING -> string
@@ -58,14 +64,19 @@ def make_parser():
       %ignore WS
     '''
   def make_parser(ps):
-    print('making grammar')
-    print(make_grammar(ps))
+    debug('making grammar')
+    debug(make_grammar(ps))
     return L.Lark(make_grammar(ps), start='term', ambiguity='explicit')
   def make_transformer(constructors):
+    debug('making transformer', constructors)
     class T(L.Transformer): pass
     for name, c in constructors.items():
-      setattr(T, name, lambda self, args: c.transform(args) if hasattr(c, 'transform') else c(*args))
-    return T
+      def go(name, c): # wrapper to get proper lexical scoping
+        def transform(self, args):
+          return c.transform(args) if hasattr(c, 'transform') else c(*args)
+        setattr(T, name, transform)
+      go(name, c)
+    return T()
   productions = []
   constructors = {} # mapping from names of classes to themselves
   # invariant: the 2 equalities below always hold
@@ -75,12 +86,16 @@ def make_parser():
     @staticmethod
     def add_production(p):
       nonlocal productions, parser, transformer
+      debug('adding production', p)
       productions.append(p)
       parser = make_parser(productions)
       constructors[classname_to_nt(p[0].__name__)] = p[0]
       transformer = make_transformer(constructors)
     @staticmethod
-    def parse(s):
+    def parses(s):
+      '''
+      Returns the parses that pretty-print as s up to whitespace.
+      '''
       nonlocal parser, transformer
       forest = parser.parse(s)
       # Condense all long strings of spaces into a single space
@@ -89,10 +104,27 @@ def make_parser():
           new = s.replace('  ', ' ')
           if s == new: return s
           s = new
+      parses = []
       for tree in L.visitors.CollapseAmbiguities().transform(forest):
+        debug('trying tree', tree)
+        debug('constructors', constructors)
         v = transformer.transform(tree)
         if condense(str(v)) == condense(s):
-          return v
+          parses.append(v)
+      return parses
+    @staticmethod
+    def parse(s):
+      '''
+      Return the unique parse that pretty-prints as s up to whitespace, if it exists.
+      '''
+      match Parser.parses(s):
+        case []: raise ValueError(f'No parse for {s}')
+        case [v]: return v
+        case _: raise ValueError(f'Ambiguous parse for {s}. Forest:\n{forest.pretty()}')
+    @staticmethod
+    def current_grammar():
+      nonlocal productions
+      return make_grammar(productions)
   return Parser()
 global_parser = make_parser()
 del make_parser
@@ -198,19 +230,19 @@ def mixfix(c):
   def simple_names(self, renaming={}, in_use=set()):
     return self.__class__(*(getattr(self, k).simple_names(renaming, in_use) for k in fields))
   def fvs(self):
-    # print(self, [(getattr(self, k), type(getattr(self, k))) for k in fields])
+    debug(self, [(getattr(self, k), type(getattr(self, k))) for k in fields])
     return set(x for k in fields for x in getattr(self, k).fvs())
   def __repr__(self):
     args = ','.join(repr(getattr(self, k)) for k in fields)
     return f'{name}({args})'
   def __eq__(self, other, renaming={}):
-    return all(getattr(self, k).__eq__(getattr(other, k), renaming) for k in fields)
+    return type(self) is type(other) and all(getattr(self, k).__eq__(getattr(other, k), renaming) for k in fields)
   def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
     def make_prec(field_name): return f'{name}.{field_name}' if field_name != name else name
     left_prec_inner = name
     right_prec_inner = make_prec(tuple(annotations.items())[-1][0]) # OK because annotations nonempty
-    # print(prec_order.graph)
-    # print(f'comparing {left_prec} <= {left_prec_inner} and {right_prec} <= {right_prec_inner} gives {prec_order.le(left_prec, left_prec_inner)} and {prec_order.le(right_prec, right_prec_inner)} = {prec_order.le(left_prec, left_prec_inner) and prec_order.le(right_prec, right_prec_inner)}')
+    debug(prec_order.graph)
+    debug(f'comparing {left_prec} <= {left_prec_inner} and {right_prec} <= {right_prec_inner} gives {prec_order.le(left_prec, left_prec_inner)} and {prec_order.le(right_prec, right_prec_inner)} = {prec_order.le(left_prec, left_prec_inner) and prec_order.le(right_prec, right_prec_inner)}')
     bracketing = not (prec_order.le(left_prec, left_prec_inner) and prec_order.le(right_prec, right_prec_inner))
     # (name of cursor position used to recur, corresponding field or None, string to append to output) for each entry in mixfix declaration
     precs = [('bot' if bracketing else name, None, '')] + list((make_prec(k), None if type(v) is Str else k, v) for (k, v) in annotations.items())
@@ -393,6 +425,11 @@ if __name__ == '__main__':
   def expect(want, have):
     if want != have:
       raise Exception(f'\nWant: {want}\nHave: {have}')
+  def raises(thunk):
+    try:
+      v = thunk()
+      raise ValueError(f'Instead of exception got {v}')
+    except: pass
 
   # 1 requires no bracketing
   expect('1 * 1', Times(Top(), Top()).pretty())
@@ -421,6 +458,19 @@ if __name__ == '__main__':
 
   # str() is same as .pretty()
   expect(True, Times(Top(), Top()).pretty() == str(Times(Top(), Top())))
+
+  # Thanks to precedences, the following strings parse unambiguously
+  expect(Plus(Top(), Top()), global_parser.parse('1 + 1'))
+  expect(Plus(Top(), Plus(Top(), Top())), global_parser.parse('1 + 1 + 1'))
+  expect(Plus(Plus(Top(), Top()), Top()), global_parser.parse('(1 + 1) + 1'))
+  expect(Plus(Times(Top(), Top()), Top()), global_parser.parse('1 * 1 + 1'))
+  expect(Plus(Pow(Top(), Top()), Top()), global_parser.parse('(1 -> 1) + 1'))
+  expect(Times(Top(), Times(Top(), Top())), global_parser.parse('1 * 1 * 1'))
+  expect(Pow(Top(), Pow(Top(), Top())), global_parser.parse('1 -> 1 -> 1'))
+
+  # * and + parens to right of ->
+  raises(lambda: global_parser.parse('1 -> 1 + 1'))
+  raises(lambda: global_parser.parse('1 -> 1 * 1'))
 
   # Example 2: extending the language with quantifiers
 
