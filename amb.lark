@@ -1,14 +1,14 @@
-term : literal
-     | term "+" term
-     | term "-" term
-     | term "*" term
-     | term "/" term
-     | "(" term ")"
+?term : literal
+  | term "+" term -> add
+  | term "-" term -> sub
+  | term "*" term -> mul
+  | term "/" term -> div
+  | "(" term ")"
 
 ?literal : string
-         | SIGNED_NUMBER -> number
-         | "true" -> true
-         | "false" -> false
+  | SIGNED_NUMBER -> number
+  | "true" -> true
+  | "false" -> false
 
 string : ESCAPED_STRING
 
