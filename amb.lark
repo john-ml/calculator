@@ -1,0 +1,18 @@
+term : literal
+     | term "+" term
+     | term "-" term
+     | term "*" term
+     | term "/" term
+     | "(" term ")"
+
+?literal : string
+         | SIGNED_NUMBER -> number
+         | "true" -> true
+         | "false" -> false
+
+string : ESCAPED_STRING
+
+%import common.ESCAPED_STRING
+%import common.SIGNED_NUMBER
+%import common.WS
+%ignore WS
