@@ -12,6 +12,14 @@ def prec_ges(pqs):
 def prec_bot(p): global_prec_order.add_bot(to_prec(p))
 def prec_top(p): global_prec_order.add_top(to_prec(p))
 
+class Str:
+  '''
+  Helper class used to specify string literals in mixfix declarations.
+  '''
+  def __init__(self, pretty, parse=None):
+    self.pretty = pretty
+    self.parse = pretty if parse is None else parse
+
 def mixfix(c):
   '''
   The decorator @mixfix adds mixfix precedence-based printing to dataclasses.
@@ -20,7 +28,7 @@ def mixfix(c):
     @mixfix
     class And:
       p: any
-      plus: str(' + ')
+      plus: Str(' + ')
       q: any
   By default, precedence mismatches are mediated by inserting parentheses using
   parens(), but one can specify a different 'bracketer' using the optional field
@@ -28,7 +36,7 @@ def mixfix(c):
     @mixfix
     class Add:
       p: any
-      plus: str(' + ')
+      plus: Str(' + ')
       q: any
       bracket = lambda s: f'({s})'
   to get ordinary parentheses instead of the LaTeX ones.
@@ -76,7 +84,7 @@ def mixfix(c):
   Given a class declaration
     class C:
       x: tx
-      y: str(s)
+      y: Str(s)
       z: tz
       etc
   Generates a dataclass with
@@ -96,7 +104,7 @@ def mixfix(c):
   assert len(annotations) != 0
   # Luckily, despite being a dict, c.__annotations__ contains items in declaration order,
   # so the order of the mixfix operators is preserved
-  fields = tuple(k for k, v in annotations.items() if type(v) is not str)
+  fields = tuple(k for k, v in annotations.items() if type(v) is not Str)
   def __init__(self, *args):
     assert len(fields) == len(args)
     for k, arg in zip(fields, args):
@@ -123,7 +131,7 @@ def mixfix(c):
     # print(f'comparing {left_prec} <= {left_prec_inner} and {right_prec} <= {right_prec_inner} gives {prec_order.le(left_prec, left_prec_inner)} and {prec_order.le(right_prec, right_prec_inner)} = {prec_order.le(left_prec, left_prec_inner) and prec_order.le(right_prec, right_prec_inner)}')
     bracketing = not (prec_order.le(left_prec, left_prec_inner) and prec_order.le(right_prec, right_prec_inner))
     # (name of cursor position used to recur, corresponding field or None, string to append to output) for each entry in mixfix declaration
-    precs = [('bot' if bracketing else name, None, '')] + list((make_prec(k), None if type(v) is str else k, v) for (k, v) in annotations.items())
+    precs = [('bot' if bracketing else name, None, '')] + list((make_prec(k), None if type(v) is Str else k, v) for (k, v) in annotations.items())
     if bracketing:
       precs[-1] = ('bot', precs[-1][1], precs[-1][2])
     # Compute left and right prec for each item
@@ -136,7 +144,8 @@ def mixfix(c):
       if k is not None:
         res += getattr(self, k).pretty(left_prec_inner, right_prec_inner, prec_order)
       else:
-        res += v
+        assert type(v) is Str
+        res += v.pretty
     return self.__class__.bracket(res) if bracketing else res
   c.__init__ = __init__
   c.__match_args__ = fields
@@ -263,7 +272,7 @@ if __name__ == '__main__':
 
   @mixfix
   class Top:
-    s: str('1')
+    s: Str('1')
     bracket = simple_parens
   prec_top(Top)
   prec_top(Top.s)
@@ -271,7 +280,7 @@ if __name__ == '__main__':
   @mixfix
   class Times:
     p: any
-    times: str(' * ')
+    times: Str(' * ')
     q: any
     bracket = simple_parens
   prec_ge(Times, Times.times) # right associative
@@ -279,7 +288,7 @@ if __name__ == '__main__':
   @mixfix
   class Plus:
     p: any
-    plus: str(' + ')
+    plus: Str(' + ')
     q: any
     bracket = simple_parens
   prec_ge(Plus, Plus.plus) # right associative
@@ -288,7 +297,7 @@ if __name__ == '__main__':
   @mixfix
   class Pow:
     p: any
-    to: str(' -> ')
+    to: Str(' -> ')
     q: any
     bracket = simple_parens
   prec_ge(Pow, Pow.to) # right associative
@@ -328,19 +337,19 @@ if __name__ == '__main__':
 
   @mixfix
   class Forall:
-    forall: str('forall ')
+    forall: Str('forall ')
     xp: F
     bracket = simple_parens
   @mixfix
   class Exists:
-    forall: str('exists ')
+    forall: Str('exists ')
     xp: F
     bracket = simple_parens
   prec_ges([(Forall.xp, Exists.xp), (Exists.xp, Forall.xp)])
   @mixfix
   class Eq:
     m: any
-    eq: str(' = ')
+    eq: Str(' = ')
     n: any
     bracket = simple_parens
   prec_ge(Eq.n, Exists.xp) # by transitivity, Eq.n >= Forall.xp
@@ -393,13 +402,13 @@ if __name__ == '__main__':
 
   @mixfix
   class Lam:
-    lam: str('\\')
+    lam: Str('\\')
     m: F
     bracket = simple_parens
   @mixfix
   class App:
     m: any
-    app: str(' ')
+    app: Str(' ')
     n: any
     bracket = simple_parens
   prec_ge(App.n, App.m) # left-associative
