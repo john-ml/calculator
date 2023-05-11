@@ -14,7 +14,7 @@ def prec_bot(p): global_prec_order.add_bot(to_prec(p))
 def prec_top(p): global_prec_order.add_top(to_prec(p))
 
 class Str:
-  '''
+  r'''
   Helper class used to specify string literals in mixfix declarations.
   S(s) specifies the string literal s is to be used in both parsing and
   pretty-printing.  Optionally, one can specify a different string literal t to
@@ -27,31 +27,78 @@ class Str:
     self.pretty = pretty
     self.parse = pretty if parse is None else parse
 
-# Highly ambiguous grammar updated by each invocation of @mixfix, stored as a
-# list of productions on a single nonterminal 'term'. A production like
-#   term -> term + term
-# is represented as the list
-#   [None, "+", None]
-global_productions = []
-def productions_to_lark_grammar(ps):
-  import re
-  lines = '\n'.join(
-    f'| {" ".join(re.escape(s) if s is None else "term" for s in p)}' for p in ps
-  )
-  return f'''
-    ?term : atom
-    {lines}
+# Parser of highly ambiguous grammar updated by each invocation of @mixfix.
+def make_parser():
+  import lark as L
+  # Annoyingly, lark nonterminals must contain only lowercase letters.
+  # So munge class names to fit this format. Assumes no class names contain _
+  def classname_to_nt(s): return 'c' + ''.join('_' + c.lower() if c.isupper() else c for c in s)
+  def nt_to_classname(s): return ''.join('' if c is '_' else c.upper() if prev is '_' else c for (prev, c) in zip(s[1:], s[2:]))
+  # The grammar is stored as a list of productions on a single nonterminal
+  # 'term'. A production like
+  #   term -> term + term
+  # for a mixfix constructor C is represented as the tuple
+  #   (C, [None, "+", None])
+  def make_grammar(ps):
+    escape = lambda s: f'"{repr(s)[1:-1]}"'
+    lines = ''.join(
+      f'\n      | {" ".join("term" if s is None else escape(s) for s in p)} -> {classname_to_nt(c.__name__)}' for c, p in ps
+    )
+    return f'''
+      ?term : atom{lines}
+  
+      ?atom : CNAME -> identifier
+      | ESCAPED_STRING -> string
+      | SIGNED_NUMBER -> number
+  
+      %import common.CNAME
+      %import common.ESCAPED_STRING
+      %import common.SIGNED_NUMBER
+      %import common.WS
+      %ignore WS
+    '''
+  def make_parser(ps):
+    print('making grammar')
+    print(make_grammar(ps))
+    return L.Lark(make_grammar(ps), start='term', ambiguity='explicit')
+  def make_transformer(constructors):
+    class T(L.Transformer): pass
+    for name, c in constructors.items():
+      setattr(T, name, lambda self, args: c.transform(args) if hasattr(c, 'transform') else c(*args))
+    return T
+  productions = []
+  constructors = {} # mapping from names of classes to themselves
+  # invariant: the 2 equalities below always hold
+  parser = make_parser(productions)
+  transformer = make_transformer(constructors)
+  class Parser:
+    @staticmethod
+    def add_production(p):
+      nonlocal productions, parser, transformer
+      productions.append(p)
+      parser = make_parser(productions)
+      constructors[classname_to_nt(p[0].__name__)] = p[0]
+      transformer = make_transformer(constructors)
+    @staticmethod
+    def parse(s):
+      nonlocal parser, transformer
+      forest = parser.parse(s)
+      # Condense all long strings of spaces into a single space
+      def condense(s):
+        while True:
+          new = s.replace('  ', ' ')
+          if s == new: return s
+          s = new
+      for tree in L.visitors.CollapseAmbiguities().transform(forest):
+        v = transformer.transform(tree)
+        if condense(str(v)) == condense(s):
+          return v
+  return Parser()
+global_parser = make_parser()
+del make_parser
 
-    ?literal : CNAME -> identifier
-    | ESCAPED_STRING -> string
-    | SIGNED_NUMBER -> number
-
-    %import common.CNAME
-    %import common.ESCAPED_STRING
-    %import common.SIGNED_NUMBER
-    %import common.WS
-    %ignore WS
-  '''
+def parse_mixfix(s):
+  global global_parser
 
 def mixfix(c):
   '''
@@ -129,6 +176,7 @@ def mixfix(c):
   - method fvs() that produces the free variables of an instance of C
   - method pretty() that pretty-prints an instance of C, omitting brackets as allowed by the global precedence order
   - method __repr__() that prints an instance of C for debugging
+  - method __str__() that calls pretty()
   - method __eq__() that tests equality up to renaming of bound variables
   - class properties x, y, z, ... for referring to cursor positions denoted by these fields
   - class property __match_args__ = ('x', 'z', ...) for pattern matching against instances of C
@@ -181,10 +229,12 @@ def mixfix(c):
         assert type(v) is Str
         res += v.pretty
     return self.__class__.bracket(res) if bracketing else res
+  def __str__(self): return self.pretty()
   c.__init__ = __init__
   c.__match_args__ = fields
   c.__repr__ = __repr__
   c.__eq__ = __eq__
+  c.__str__ = __str__
   c.fresh = fresh
   c.subst = subst
   c.simple_names = simple_names
@@ -194,6 +244,8 @@ def mixfix(c):
     setattr(c, k, f'{name}.{k}')
   if not hasattr(c, 'bracket'):
     c.bracket = parens
+  global global_parser
+  global_parser.add_production((c, [None if type(v) is not Str else v.parse for k, v in annotations.items()]))
   return c
 
 # ---------- Abstract binding trees ----------
@@ -367,6 +419,9 @@ if __name__ == '__main__':
   expect('1 -> (1 * 1)', Pow(Top(), Times(Top(), Top())).pretty())
   expect('1 -> (1 + 1)', Pow(Top(), Plus(Top(), Top())).pretty())
 
+  # str() is same as .pretty()
+  expect(True, Times(Top(), Top()).pretty() == str(Times(Top(), Top())))
+
   # Example 2: extending the language with quantifiers
 
   @mixfix
@@ -391,7 +446,7 @@ if __name__ == '__main__':
 
   p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
   expect('forall x@0. exists y@1. x@0 = y@1', p.pretty())
-  expect('forall x. exists y. x = y', p.simple_names().pretty())
+  expect('forall x. exists y. x = y', str(p.simple_names()))
 
   # Equality up to renaming
   mxy = Forall(F('x', lambda x: Forall(F('y', lambda y: Eq(x, y)))))
@@ -428,9 +483,9 @@ if __name__ == '__main__':
 
   p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y))))))))
   expect(set(), p.fvs())
-  expect('forall x. forall y. exists z. (y = y) * (x = y)', p.simple_names().pretty())
+  expect('forall x. forall y. exists z. (y = y) * (x = y)', str(p.simple_names()))
   p = simplify(p)
-  expect('forall x. forall y. x = y', p.simple_names().pretty())
+  expect('forall x. forall y. x = y', str(p.simple_names()))
 
   # Example 4: untyped LC
 
@@ -449,8 +504,8 @@ if __name__ == '__main__':
 
   # Check printing of function applications
   id = Lam(F('x', lambda x: x))
-  expect(r'(\x. x) ((\x. x) (\x. x))', App(id, App(id, id)).simple_names().pretty())
-  expect(r'(\x. x) (\x. x) (\x. x)', App(App(id, id), id).simple_names().pretty())
+  expect(r'(\x. x) ((\x. x) (\x. x))', str(App(id, App(id, id)).simple_names()))
+  expect(r'(\x. x) (\x. x) (\x. x)', str(App(App(id, id), id).simple_names()))
 
   # One-step CBN reduction
   class Stuck(Exception): pass
@@ -463,19 +518,19 @@ if __name__ == '__main__':
         except Stuck: return App(m, step(n))
       case V(x): raise Stuck()
 
-  expect(r'\x. x', step(App(id, id)).simple_names().pretty())
+  expect(r'\x. x', str(step(App(id, id)).simple_names()))
 
   # Check capture-avoiding substitution on \y. (\x. \y. x) y
   k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
   v = lambda y: y
   m = Lam(F('y', lambda y: App(k(y), v(y))))
-  expect(r'\y. ((\x. \y@0. x) y)', m.simple_names().pretty())
+  expect(r'\y. ((\x. \y@0. x) y)', str(m.simple_names()))
   m = step(m)
-  expect(r'\y. \y@0. y', m.simple_names().pretty())
+  expect(r'\y. \y@0. y', str(m.simple_names()))
 
   # Omega Omega -> Omega Omega
   omega = Lam(F('x', lambda x: App(x, x)))
   omega2 = App(omega, omega)
-  expect(r'(\x. x x) (\x. x x)', omega2.simple_names().pretty())
+  expect(r'(\x. x x) (\x. x x)', str(omega2.simple_names()))
   omega2 = step(omega2)
-  expect(r'(\x. x x) (\x. x x)', omega2.simple_names().pretty())
+  expect(r'(\x. x x) (\x. x x)', str(omega2.simple_names()))

@@ -17,7 +17,8 @@ class T(Transformer):
   true = lambda self, _: True
   false = lambda self, _: False
   string = lambda self, s: literal_eval(s[0])
-  number = lambda self, n: float(n[0])
+
+setattr(T, 'number', lambda self, n: float(n[0]))
 
 print(T().transform(json_parser.parse(json)))
 
