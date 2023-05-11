@@ -53,19 +53,19 @@ for t in CollapseAmbiguities().transform(ts): print(t.pretty())
 print(ts)
 print(ts.pretty())
 
-# def evaluate(op, xs):
-#   match op, xs:
-#     case 'add', [x, y]: return x + y
-#     case 'sub', [x, y]: return x - y
-#     case 'mul', [x, y]: return x * y
-#     case 'div', [x, y]: return x / y
-#     case 'div', [x, y]: return x / y
-#     case 'string', _: return 0
-#     case 'true', _: return 1
-#     case 'false', _: return 0
-#     case 'number', [x]: return float(x)
-#     case _, _: assert False
+def evaluate(op, xs):
+  match op, xs:
+    case 'add', [x, y]: return x + y
+    case 'sub', [x, y]: return x - y
+    case 'mul', [x, y]: return x * y
+    case 'div', [x, y]: return x / y
+    case 'div', [x, y]: return x / y
+    case 'string', _: return 0
+    case 'true', _: return 1
+    case 'false', _: return 0
+    case 'number', [x]: return float(x)
+    case _, _: assert False
 
-# term_parser = Lark(open('amb.lark').read(), start='term', tree_class=evaluate)
-# term = '1 + 1 + 1'
-# print(term_parser.parse(term))
+term_parser = Lark(open('amb.lark').read(), start='term', tree_class=evaluate)
+term = '1 + 1 + 1'
+print(term_parser.parse(term))
