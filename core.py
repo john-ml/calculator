@@ -120,7 +120,7 @@ def make_parser():
       match Parser.parses(s):
         case []: raise ValueError(f'No parse for {s}')
         case [v]: return v
-        case _: raise ValueError(f'Ambiguous parse for {s}. Forest:\n{forest.pretty()}')
+        case parses: raise ValueError(f"Ambiguous parse for {s}. Parses:\n{parses}")
     @staticmethod
     def current_grammar():
       nonlocal productions
