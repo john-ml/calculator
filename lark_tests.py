@@ -39,7 +39,7 @@ json_parser = Lark(open('json.lark').read(), start='value', tree_class=inline_tr
 json = '{"key": ["s", "\\n", 3.14, true, null]}'
 print(json_parser.parse(json))
 
-# ---------- Trying out a highly ambiguous grammar ----------
+# ---------- Trying out an ambiguous arithmetic grammar ----------
 
 term_parser = Lark(open('amb.lark').read(), start='term')
 print(term_parser.parse('1 + 1 + 1').pretty())
@@ -69,3 +69,9 @@ def evaluate(op, xs):
 term_parser = Lark(open('amb.lark').read(), start='term', tree_class=evaluate)
 term = '1 + 1 + 1'
 print(term_parser.parse(term))
+
+# ---------- Trying out an ambiguous LC grammar ----------
+
+term_parser = Lark(open('lc.lark').read(), start='term', ambiguity='explicit')
+ts = term_parser.parse(r'(\x.x x) (\x. x x)')
+print(ts.pretty())

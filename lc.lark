@@ -1,0 +1,12 @@
+?term : literal
+| term " " term
+| "\\" term "." term
+| "(" term ")"
+
+?literal : CNAME -> identifier
+| SIGNED_NUMBER -> number
+
+%import common.CNAME
+%import common.SIGNED_NUMBER
+%import common.WS
+%ignore WS

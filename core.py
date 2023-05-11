@@ -2,6 +2,7 @@
 
 def parens(s): return f'\\left({s}\\right)'
 
+# Global poset on cursor positions used by pretty-printer (see help(mixfix))
 from poset import Poset
 global_prec_order = Poset().add_bot('bot').add_top('top')
 def to_prec(p): return p.__name__ if type(p) is type else p
@@ -15,14 +16,47 @@ def prec_top(p): global_prec_order.add_top(to_prec(p))
 class Str:
   '''
   Helper class used to specify string literals in mixfix declarations.
+  S(s) specifies the string literal s is to be used in both parsing and
+  pretty-printing.  Optionally, one can specify a different string literal t to
+  be used during parsing (e.g. to parse \x.e as a lambda term and pretty-print
+  it in LaTeX with \lambda) by S(s, parse=t) or S(s, t).
+
+  For example use of S see help(mixfix).
   '''
   def __init__(self, pretty, parse=None):
     self.pretty = pretty
     self.parse = pretty if parse is None else parse
 
+# Highly ambiguous grammar updated by each invocation of @mixfix, stored as a
+# list of productions on a single nonterminal 'term'. A production like
+#   term -> term + term
+# is represented as the list
+#   [None, "+", None]
+global_productions = []
+def productions_to_lark_grammar(ps):
+  import re
+  lines = '\n'.join(
+    f'| {" ".join(re.escape(s) if s is None else "term" for s in p)}' for p in ps
+  )
+  return f'''
+    ?term : atom
+    {lines}
+
+    ?literal : CNAME -> identifier
+    | ESCAPED_STRING -> string
+    | SIGNED_NUMBER -> number
+
+    %import common.CNAME
+    %import common.ESCAPED_STRING
+    %import common.SIGNED_NUMBER
+    %import common.WS
+    %ignore WS
+  '''
+
 def mixfix(c):
   '''
-  The decorator @mixfix adds mixfix precedence-based printing to dataclasses.
+  The decorator @mixfix allows declaring dataclass that additionally support
+  mixfix precedence-based parsing and pretty-printing.
   
   For example, to declare an operator And(p, q) that pretty-prints as p + q:
     @mixfix
