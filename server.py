@@ -43,6 +43,7 @@ def on_input():
   print('Received input:', s)
   try: return prog.on_input(s.split())
   # try: return prog.tex(s)
+  # try: return str(eval(s))
   except: return img('serverok.png')
 
 if __name__ == '__main__':
