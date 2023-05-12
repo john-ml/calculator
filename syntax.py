@@ -1,4 +1,4 @@
-# ---------- Mixfix ----------
+# ---------- Mixfix decorator ----------
 
 def parens(s): return f'\\left({s}\\right)'
 
