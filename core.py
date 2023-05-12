@@ -504,8 +504,10 @@ if __name__ == '__main__':
   expect(Plus(Plus(Top(), Top()), Top()), global_parser.parse('((1 + 1) + 1)'))
   expect(Plus(Plus(Top(), Top()), Top()), global_parser.parse('(((1 + 1)) + (1))'))
 
-  # # Spaces are optional
-  # expect(Plus(Top(), Plus(Top(), Top())), global_parser.parse('1+1+1'))
+  # Spaces are flexible, even though pretty-printing produces canonical spacing
+  expect(Plus(Top(), Plus(Top(), Top())), global_parser.parse('1+1+1'))
+  expect(Plus(Times(Top(), Top()), Top()), global_parser.parse('1*1+1'))
+  expect(Plus(Times(Top(), Top()), Top()), global_parser.parse('1  *1+     1'))
 
   # Example 2: extending the language with quantifiers
 
