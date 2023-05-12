@@ -513,12 +513,12 @@ if __name__ == '__main__':
 
   @mixfix
   class Forall:
-    forall: Str('forall ')
+    forall: Str('∀ ', 'forall ')
     xp: F
     bracket = simple_parens
   @mixfix
   class Exists:
-    forall: Str('exists ')
+    forall: Str('∃ ', 'exists ')
     xp: F
     bracket = simple_parens
   prec_ges([(Forall.xp, Exists.xp), (Exists.xp, Forall.xp)])
@@ -532,8 +532,8 @@ if __name__ == '__main__':
   prec_ge(Times.q, Exists.xp)
 
   p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
-  expect('forall x@0. exists y@1. x@0 = y@1', p.pretty())
-  expect('forall x. exists y. x = y', p.simple_names().pretty())
+  expect('∀ x@0. ∃ y@1. x@0 = y@1', p.pretty())
+  expect('∀ x. ∃ y. x = y', p.simple_names().pretty())
 
   # Equality up to renaming
   mxy = Forall(F('x', lambda x: Forall(F('y', lambda y: Eq(x, y)))))
@@ -593,9 +593,9 @@ if __name__ == '__main__':
 
   p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y))))))))
   expect(set(), p.fvs())
-  expect('forall x. forall y. exists z. (y = y) * (x = y)', p.simple_names().pretty())
+  expect('∀ x. ∀ y. ∃ z. (y = y) * (x = y)', p.simple_names().pretty())
   p = simplify(p)
-  expect('forall x. forall y. x = y', p.simple_names().pretty())
+  expect('∀ x. ∀ y. x = y', p.simple_names().pretty())
 
   # Example 4: untyped LC
 
