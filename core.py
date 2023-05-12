@@ -564,7 +564,7 @@ if __name__ == '__main__':
     Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y)))))))), 
     global_parser.parse('forall x. forall y. exists z. (y = y) * (x = y)')
   )
-  raises(lambda: global_parser.parse('forall x. forall y. exists z. (y = y) * x = y'))
+  raises(lambda: global_parser.parse('forall x. forall y. exists z. (y = y) * x = y')) # missing parens around x = y
 
   # Example 3: pattern matching on ABTs
 
@@ -591,9 +591,9 @@ if __name__ == '__main__':
       case _:
         assert False
 
-  p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y))))))))
+  p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Times(Eq(x, y), Eq(z, z)))))))))
   expect(set(), p.fvs())
-  expect('∀ x. ∀ y. ∃ z. (y = y) * (x = y)', p.simple_names().pretty())
+  expect('∀ x. ∀ y. ∃ z. (y = y) * (x = y) * (z = z)', p.simple_names().pretty())
   p = simplify(p)
   expect('∀ x. ∀ y. x = y', p.simple_names().pretty())
 
