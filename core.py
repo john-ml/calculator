@@ -1,7 +1,7 @@
 DEBUG = False
 debug = print if DEBUG else (lambda *xs: None)
 
-# ---------- Mixfix printing ----------
+# ---------- Mixfix ----------
 
 def parens(s): return f'\\left({s}\\right)'
 
@@ -166,10 +166,11 @@ def parse_mixfix(s):
 
 def mixfix(c):
   '''
-  The decorator @mixfix allows declaring dataclass that additionally support
-  mixfix precedence-based parsing and pretty-printing.
+  The decorator @mixfix allows declaring an ABT (abstract binding tree)
+  constructor that additionally supports mixfix precedence-based parsing and
+  pretty-printing.
   
-  For example, to declare an operator And(p, q) that pretty-prints as p + q:
+  For example, to declare And(p, q) that parses and pretty-prints as p + q:
     @mixfix
     class And:
       p: any
@@ -232,7 +233,7 @@ def mixfix(c):
       y: Str(s)
       z: tz
       etc
-  Generates a dataclass with
+  @mixfix generates a dataclass with
   - fields x: t, z: tz, ... (fields with 'string literal type' omitted)
   - method fresh(renaming) that freshens all bound variables (instances of the class F) in each field
   - method subst(**substitution) that applies the given substitution
