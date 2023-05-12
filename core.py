@@ -225,16 +225,16 @@ def mixfix(c):
       etc
   @mixfix generates a dataclass with
   - fields x: t, z: tz, ... (fields with 'string literal type' omitted)
+  - class properties x, y, z, ... for referring to cursor positions denoted by these fields
+  - class property __match_args__ = ('x', 'z', ...) for pattern matching against instances of C
+  - method pretty() that pretty-prints an instance of C, omitting brackets as allowed by the global precedence order
+  - method __repr__() that prints an instance of C for debugging
+  - method __str__(), like pretty() but prints with string literals specified for parsing so that parse(str(v)) == v
+  - method __eq__() that tests equality up to renaming of bound variables
   - method fresh(renaming) that freshens all bound variables (instances of the class F) in each field
   - method subst(**substitution) that applies the given substitution
   - method simple_names(renaming, in_use) that maximally simplifies disambiguators on bound variable names
   - method fvs() that produces the free variables of an instance of C
-  - method pretty() that pretty-prints an instance of C, omitting brackets as allowed by the global precedence order
-  - method __repr__() that prints an instance of C for debugging
-  - method __str__() that calls pretty()
-  - method __eq__() that tests equality up to renaming of bound variables
-  - class properties x, y, z, ... for referring to cursor positions denoted by these fields
-  - class property __match_args__ = ('x', 'z', ...) for pattern matching against instances of C
   '''
   name = c.__name__
   annotations = c.__annotations__
@@ -246,20 +246,12 @@ def mixfix(c):
     assert len(fields) == len(args)
     for k, arg in zip(fields, args):
       setattr(self, k, arg)
-  def fresh(self, renaming):
-    return self.__class__(*(getattr(self, k).fresh(renaming) for k in fields))
-  def subst(self, substitution):
-    return self.__class__(*(getattr(self, k).subst(substitution) for k in fields))
-  def simple_names(self, renaming={}, in_use=set()):
-    return self.__class__(*(getattr(self, k).simple_names(renaming, in_use) for k in fields))
-  def fvs(self):
-    return set(x for k in fields for x in getattr(self, k).fvs())
   def __repr__(self):
     args = ','.join(repr(getattr(self, k)) for k in fields)
     return f'{name}({args})'
   def __eq__(self, other, renaming={}):
     return type(self) is type(other) and all(getattr(self, k).__eq__(getattr(other, k), renaming) for k in fields)
-  def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
+  def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order, get_str=lambda x: x.pretty):
     def make_prec(field_name): return f'{name}.{field_name}' if field_name != name else name
     left_prec_inner = name
     right_prec_inner = make_prec(tuple(annotations.items())[-1][0]) # OK because annotations nonempty
@@ -276,22 +268,30 @@ def mixfix(c):
     res = ''
     for (left_prec_inner, (k, v), right_prec_inner) in items:
       if k is not None:
-        res += getattr(self, k).pretty(left_prec_inner, right_prec_inner, prec_order)
+        res += getattr(self, k).pretty(left_prec_inner, right_prec_inner, prec_order, get_str)
       else:
         assert type(v) is Str
-        res += v.pretty
+        res += get_str(v)
     return self.__class__.bracket(res) if bracketing else res
-  def __str__(self): return self.pretty()
+  def __str__(self): return self.pretty(get_str=lambda x: x.parse)
+  def fresh(self, renaming):
+    return self.__class__(*(getattr(self, k).fresh(renaming) for k in fields))
+  def subst(self, substitution):
+    return self.__class__(*(getattr(self, k).subst(substitution) for k in fields))
+  def simple_names(self, renaming={}, in_use=set()):
+    return self.__class__(*(getattr(self, k).simple_names(renaming, in_use) for k in fields))
+  def fvs(self):
+    return set(x for k in fields for x in getattr(self, k).fvs())
   c.__init__ = __init__
   c.__match_args__ = fields
   c.__repr__ = __repr__
   c.__eq__ = __eq__
   c.__str__ = __str__
+  c.pretty = pretty
   c.fresh = fresh
   c.subst = subst
   c.simple_names = simple_names
   c.fvs = fvs
-  c.pretty = pretty
   for k in annotations:
     setattr(c, k, f'{name}.{k}')
   if not hasattr(c, 'bracket'):
@@ -339,7 +339,7 @@ class V:
   def subst(self, substitution): return substitution[self.x] if self.x in substitution else self
   def simple_names(self, renaming={}, in_use=set()): return V(renaming[self.x]) if self.x in renaming else self
   def fvs(self): return {self.x}
-  def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order): return str(self.x)
+  def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order, get_str=lambda x: x.pretty): return str(self.x)
 
 class F:
   '''
@@ -398,8 +398,8 @@ class F:
   def set_unwrap(self): assert False
   unwrap = property(get_unwrap, set_unwrap)
 
-  def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
-    return f"{str(self.x)}. {self.e.pretty('bot', right_prec, prec_order)}"
+  def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order, get_str=lambda x: x.pretty):
+    return f"{str(self.x)}. {self.e.pretty('bot', right_prec, prec_order, get_str)}"
   
   @staticmethod
   def transform(args):
@@ -484,14 +484,14 @@ if __name__ == '__main__':
   expect('(1 -> 1) -> 1', Pow(Pow(Top(), Top()), Top()).pretty())
   # * and + take precedence over -> on left
   expect('1 * 1 -> 1', Pow(Times(Top(), Top()), Top()).pretty())
-  expect('1 * (1 -> 1)', Times(Top(), Pow(Top(), Top)).pretty())
+  expect('1 * (1 -> 1)', Times(Top(), Pow(Top(), Top())).pretty())
   expect('1 + 1 -> 1', Pow(Plus(Top(), Top()), Top()).pretty())
   expect('1 + (1 -> 1)', Plus(Top(), Pow(Top(), Top())).pretty())
   # * and + do NOT take precedence over -> on right
   expect('1 -> (1 * 1)', Pow(Top(), Times(Top(), Top())).pretty())
   expect('1 -> (1 + 1)', Pow(Top(), Plus(Top(), Top())).pretty())
 
-  # str() is same as .pretty()
+  # Since parse-literals are same as pretty-literals, str() is same as .pretty()
   expect(True, Times(Top(), Top()).pretty() == str(Times(Top(), Top())))
 
   # Thanks to precedences, the following strings parse unambiguously
@@ -592,7 +592,6 @@ if __name__ == '__main__':
           case p, q: return Times(p, q)
       case Pow(p, q): return Pow(simplify(p), simplify(q))
       case _:
-        print(p)
         assert False
 
   p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y))))))))
@@ -605,7 +604,7 @@ if __name__ == '__main__':
 
   @mixfix
   class Lam:
-    lam: Str('\\')
+    lam: Str('λ', '\\')
     m: F
     bracket = simple_parens
   @mixfix
@@ -617,10 +616,14 @@ if __name__ == '__main__':
   prec_ge(App.n, App.m) # left-associative
   prec_ge(App.n, Lam.m) # application binds stronger than λ
 
-  # Check printing of function applications
+  # str uses \ while pretty uses λ
   id = Lam(F('x', lambda x: x))
-  expect(r'(\x. x) ((\x. x) (\x. x))', str(App(id, App(id, id)).simple_names()))
-  expect(r'(\x. x) (\x. x) (\x. x)', str(App(App(id, id), id).simple_names()))
+  expect('λx. x', id.simple_names().pretty())
+  expect(r'\x. x', str(id.simple_names()))
+
+  # Check printing of function applications
+  expect('(λx. x) ((λx. x) (λx. x))', App(id, App(id, id)).simple_names().pretty())
+  expect('(λx. x) (λx. x) (λx. x)', App(App(id, id), id).simple_names().pretty())
 
   # One-step CBN reduction
   class Stuck(Exception): pass
@@ -633,23 +636,23 @@ if __name__ == '__main__':
         except Stuck: return App(m, step(n))
       case V(x): raise Stuck()
 
-  expect(r'\x. x', str(step(App(id, id)).simple_names()))
+  expect('λx. x', step(App(id, id)).simple_names().pretty())
 
   # Check capture-avoiding substitution on \y. (\x. \y. x) y
   k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
   v = lambda y: y
   m = Lam(F('y', lambda y: App(k(y), v(y))))
-  expect(r'\y. (\x. \y@0. x) y', str(m.simple_names()))
+  expect('λy. (λx. λy@0. x) y', m.simple_names().pretty())
   m = step(m)
-  expect(r'\y. \y@0. y', str(m.simple_names()))
+  expect('λy. λy@0. y', m.simple_names().pretty())
 
   # Omega Omega -> Omega Omega
   omega = Lam(F('x', lambda x: App(x, x)))
-  expect(r'\x. x x', str(omega.simple_names()))
+  expect('λx. x x', omega.simple_names().pretty())
   omega2 = App(omega, omega)
-  expect(r'(\x. x x) (\x. x x)', str(omega2.simple_names()))
+  expect('(λx. x x) (λx. x x)', omega2.simple_names().pretty())
   omega2 = step(omega2)
-  expect(r'(\x. x x) (\x. x x)', str(omega2.simple_names()))
+  expect('(λx. x x) (λx. x x)', omega2.simple_names().pretty())
 
   # Parsing
   expect(omega, global_parser.parse(r'\x. x x'))
