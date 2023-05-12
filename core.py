@@ -622,6 +622,7 @@ if __name__ == '__main__':
     n: any
     bracket = simple_parens
   prec_ge(App.n, App.m) # left-associative
+  prec_ge(App.n, Lam.m) # application binds stronger than λ
 
   # Check printing of function applications
   id = Lam(F('x', lambda x: x))
@@ -645,13 +646,19 @@ if __name__ == '__main__':
   k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
   v = lambda y: y
   m = Lam(F('y', lambda y: App(k(y), v(y))))
-  expect(r'\y. ((\x. \y@0. x) y)', str(m.simple_names()))
+  expect(r'\y. (\x. \y@0. x) y', str(m.simple_names()))
   m = step(m)
   expect(r'\y. \y@0. y', str(m.simple_names()))
 
   # Omega Omega -> Omega Omega
   omega = Lam(F('x', lambda x: App(x, x)))
+  expect(r'\x. x x', str(omega.simple_names()))
   omega2 = App(omega, omega)
   expect(r'(\x. x x) (\x. x x)', str(omega2.simple_names()))
   omega2 = step(omega2)
   expect(r'(\x. x x) (\x. x x)', str(omega2.simple_names()))
+
+  # Parsing
+  expect(omega, global_parser.parse(r'\x. x x'))
+  expect(omega, global_parser.parse(r'\x. (x x)'))
+  expect(omega2, global_parser.parse(r'(\x. (x x)) ((\x. (x x)))'))
