@@ -96,8 +96,7 @@ def make_parser():
     @staticmethod
     def parses(s):
       '''
-      Returns the parses that pretty-print as s up to whitespace.
-      Will return at most 1 parse so long as pretty-printing is injective.
+      Returns the parses that pretty-print as s up to whitespace and extra parens.
       '''
       nonlocal parser, transformer
       forest = parser.parse(s)
@@ -107,18 +106,43 @@ def make_parser():
           new = s.replace('  ', ' ')
           if s == new: return s
           s = new
+      # Check if t is a version of s with extraneous parens removed
+      def reducible_to(s, t):
+        if s == t: return True
+        set_s = set(s)
+        set_t = set(t)
+        if set_s.symmetric_difference(set_t) - set('()') != set(): return False
+        if (set_s - set_t) - set('()') != set(): return False
+        i = 0
+        j = 0
+        while True:
+          if j == len(t):
+            return True
+          elif s[i] == t[j]:
+            i += 1
+            j += 1
+          elif s[i] in '()':
+            i += 1
+          else:
+            return False
       parses = []
       for tree in L.visitors.CollapseAmbiguities().transform(forest):
         debug('trying tree', tree)
         debug('constructors', constructors)
-        v = transformer.transform(tree)
-        if condense(str(v)) == condense(s):
+        try: v = transformer.transform(tree)
+        except: continue
+        lhs = condense(s)
+        rhs = condense(str(v))
+        b = reducible_to(lhs, rhs)
+        debug(f'reducible_to({lhs}, {rhs}) = {b}')
+        if b:
           parses.append(v)
       return parses
     @staticmethod
     def parse(s):
       '''
-      Return the unique parse that pretty-prints as s up to whitespace, if it exists.
+      Return the unique parse that pretty-prints as s up to whitespace and extra
+      parens, if it exists.
       '''
       match Parser.parses(s):
         case []: raise ValueError(f'No parse for {s}')
@@ -383,7 +407,14 @@ class F:
 
   def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
     return f"{str(self.x)}. {self.e.pretty('bot', right_prec, prec_order)}"
-global_parser.add_production((F, [None, ".", None]))
+  
+  @staticmethod
+  def transform(args):
+    match args:
+      case [V(x), e]: return F(x, e)
+      case _: raise ValueError(f'F.transform({repr(args)})')
+
+global_parser.add_production((F, [None, ". ", None]))
 
 # ---------- Examples ----------
 
@@ -479,9 +510,14 @@ if __name__ == '__main__':
   expect(Times(Top(), Times(Top(), Top())), global_parser.parse('1 * 1 * 1'))
   expect(Pow(Top(), Pow(Top(), Top())), global_parser.parse('1 -> 1 -> 1'))
 
-  # * and + parens to right of ->
+  # * and + need parens to right of ->
   raises(lambda: global_parser.parse('1 -> 1 + 1'))
   raises(lambda: global_parser.parse('1 -> 1 * 1'))
+
+  # Superfluous parentheses are allowed
+  expect(Plus(Top(), Plus(Top(), Top())), global_parser.parse('1 + (1 + 1)'))
+  expect(Plus(Plus(Top(), Top()), Top()), global_parser.parse('((1 + 1) + 1)'))
+  expect(Plus(Plus(Top(), Top()), Top()), global_parser.parse('(((1 + 1)) + (1))'))
 
   # Example 2: extending the language with quantifiers
 
@@ -516,8 +552,29 @@ if __name__ == '__main__':
   expect(True, mxy == muv)
   expect(False, mxy == muv_flip)
 
-  # Parsing of identifiers as variable names
+  # Parsing of C identifiers as variable names
   expect(V(Name('a')), global_parser.parse('a'))
+  expect(V(Name('snake_case123')), global_parser.parse('snake_case123'))
+  expect(V(Name('_abc')), global_parser.parse('_abc'))
+
+  # Parsing of binding forms
+  expect(F(Name('x'), V(Name('x'))), global_parser.parse('x. x'))
+  expect(F(Name('x'), V(Name('y'))), global_parser.parse('x. y'))
+  # The bad parse (x. x). x is discarded because the call to F.__init__ raises
+  expect(F(Name('x'), F(Name('x'), V(Name('x')))), global_parser.parse('x. x. x')) 
+
+  # Parsing of quantified formulas
+  # Note: tests are happening up to renaming of bound variables, because
+  # F.__eq__ works up to renaming
+  expect(Forall(F('x', lambda x: x)), global_parser.parse('forall x. x'))
+  expect(Exists(F('x', lambda x: x)), global_parser.parse('exists x. x'))
+  expect(Forall(F('p', lambda p: Times(p, p))), global_parser.parse('forall x. x * x'))
+  expect(Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y))))), global_parser.parse('forall x. exists y. x = y'))
+  expect(
+    Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y)))))))), 
+    global_parser.parse('forall x. forall y. exists z. (y = y) * (x = y)')
+  )
+  raises(lambda: global_parser.parse('forall x. forall y. exists z. (y = y) * x = y'))
 
   # Example 3: pattern matching on ABTs
 
