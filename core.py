@@ -49,7 +49,7 @@ def make_parser():
     # precedence and associativity should produce properly-factored ones.
     escape = lambda s: f'"{repr(s)[1:-1]}"'
     lines = ''.join(
-      f'\n      | {" ".join("term" if s is None else escape(s) for s in p)} -> {classname_to_nt(c.__name__)}' for c, p in ps
+      f'\n      | {" ".join("term" if s is None else "" if s == "" else escape(s) for s in p)} -> {classname_to_nt(c.__name__)}' for c, p in ps
     )
     return f'''
       ?term : atom{lines}
@@ -118,14 +118,17 @@ def make_parser():
           else:
             return False
       parses = []
+      seen = set()
       for tree in L.visitors.CollapseAmbiguities().transform(forest):
+        # Sometimes forest does not share perfectly in highly ambiguous grammars, and there are duplicate trees
+        if tree in seen: continue
+        seen.add(tree)
         try: v = transformer.transform(tree)
         except: continue
         remove_whitespace = lambda s: ''.join(s.split())
         lhs = remove_whitespace(s)
         rhs = remove_whitespace(str(v))
-        b = reducible_to(lhs, rhs)
-        if b:
+        if reducible_to(lhs, rhs):
           parses.append(v)
       return parses
     @staticmethod
@@ -363,7 +366,7 @@ class F:
   def __eq__(self, other, renaming={}):
     return type(other) is F and self.e.__eq__(other.e, renaming | {self.x: other.x})
 
-  def __str__(self): return self.pretty()
+  def __str__(self): return self.pretty(get_str=lambda x: x.parse)
 
   def fresh(self, renaming):
     x = self.x.fresh()
@@ -394,7 +397,8 @@ class F:
   unwrap = property(get_unwrap, set_unwrap)
 
   def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order, get_str=lambda x: x.pretty):
-    return f"{str(self.x)}. {self.e.pretty('bot', right_prec, prec_order, get_str)}"
+    dot = Str('. ', '.')
+    return f"{str(self.x)}{get_str(dot)}{self.e.pretty('bot', right_prec, prec_order, get_str)}"
   
   @staticmethod
   def transform(args):
@@ -402,7 +406,7 @@ class F:
       case [V(x), e]: return F(x, e)
       case _: raise ValueError(f'F.transform({repr(args)})')
 
-global_parser.add_production((F, [None, ". ", None]))
+global_parser.add_production((F, [None, ".", None]))
 
 # ---------- Examples ----------
 
@@ -607,16 +611,16 @@ if __name__ == '__main__':
   @mixfix
   class App:
     m: any
-    app: Str(' ')
+    app: Str(' ', '')
     n: any
     bracket = simple_parens
   prec_ge(App.n, App.m) # left-associative
   prec_ge(App.n, Lam.m) # application binds stronger than λ
 
-  # str uses \ while pretty uses λ
+  # str uses \ and condensed . while pretty uses λ
   id = Lam(F('x', lambda x: x))
   expect('λx. x', id.simple_names().pretty())
-  expect(r'\x. x', str(id.simple_names()))
+  expect(r'\x.x', str(id.simple_names()))
 
   # Check printing of function applications
   expect('(λx. x) ((λx. x) (λx. x))', App(id, App(id, id)).simple_names().pretty())
@@ -655,3 +659,7 @@ if __name__ == '__main__':
   expect(omega, global_parser.parse(r'\x. x x'))
   expect(omega, global_parser.parse(r'\x. (x x)'))
   expect(omega2, global_parser.parse(r'(\x. (x x)) ((\x. (x x)))'))
+  expect(App(App(id, id), id), global_parser.parse(r'(\x.x)(\x.x)(\x.x)'))
+  # Even though the production for App is term -> term term, this still has a
+  # unique parse because parsing of identifiers always takes the longest match
+  expect(V(Name('xy')), global_parser.parse(r'xy'))
