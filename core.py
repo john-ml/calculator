@@ -98,12 +98,6 @@ def make_parser():
       '''
       nonlocal parser, transformer
       forest = parser.parse(s)
-      # Condense all long strings of spaces into a single space
-      def condense(s):
-        while True:
-          new = s.replace('  ', ' ')
-          if s == new: return s
-          s = new
       # Check if t is a version of s with extraneous parens removed
       def reducible_to(s, t):
         if s == t: return True
@@ -127,8 +121,9 @@ def make_parser():
       for tree in L.visitors.CollapseAmbiguities().transform(forest):
         try: v = transformer.transform(tree)
         except: continue
-        lhs = condense(s)
-        rhs = condense(str(v))
+        remove_whitespace = lambda s: ''.join(s.split())
+        lhs = remove_whitespace(s)
+        rhs = remove_whitespace(str(v))
         b = reducible_to(lhs, rhs)
         if b:
           parses.append(v)
@@ -433,7 +428,7 @@ if __name__ == '__main__':
   @mixfix
   class Times:
     p: any
-    times: Str(' * ')
+    times: Str(' * ', '*')
     q: any
     bracket = simple_parens
   prec_ge(Times, Times.times) # right associative
@@ -441,7 +436,7 @@ if __name__ == '__main__':
   @mixfix
   class Plus:
     p: any
-    plus: Str(' + ')
+    plus: Str(' + ', '+')
     q: any
     bracket = simple_parens
   prec_ge(Plus, Plus.plus) # right associative
@@ -450,7 +445,7 @@ if __name__ == '__main__':
   @mixfix
   class Pow:
     p: any
-    to: Str(' -> ')
+    to: Str(' -> ', '->')
     q: any
     bracket = simple_parens
   prec_ge(Pow, Pow.to) # right associative
@@ -491,9 +486,6 @@ if __name__ == '__main__':
   expect('1 -> (1 * 1)', Pow(Top(), Times(Top(), Top())).pretty())
   expect('1 -> (1 + 1)', Pow(Top(), Plus(Top(), Top())).pretty())
 
-  # Since parse-literals are same as pretty-literals, str() is same as .pretty()
-  expect(True, Times(Top(), Top()).pretty() == str(Times(Top(), Top())))
-
   # Thanks to precedences, the following strings parse unambiguously
   expect(Plus(Top(), Top()), global_parser.parse('1 + 1'))
   expect(Plus(Top(), Plus(Top(), Top())), global_parser.parse('1 + 1 + 1'))
@@ -512,6 +504,9 @@ if __name__ == '__main__':
   expect(Plus(Plus(Top(), Top()), Top()), global_parser.parse('((1 + 1) + 1)'))
   expect(Plus(Plus(Top(), Top()), Top()), global_parser.parse('(((1 + 1)) + (1))'))
 
+  # # Spaces are optional
+  # expect(Plus(Top(), Plus(Top(), Top())), global_parser.parse('1+1+1'))
+
   # Example 2: extending the language with quantifiers
 
   @mixfix
@@ -528,7 +523,7 @@ if __name__ == '__main__':
   @mixfix
   class Eq:
     m: any
-    eq: Str(' = ')
+    eq: Str(' = ', '=')
     n: any
     bracket = simple_parens
   prec_ge(Eq.n, Exists.xp) # by transitivity, Eq.n >= Forall.xp
@@ -536,7 +531,7 @@ if __name__ == '__main__':
 
   p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
   expect('forall x@0. exists y@1. x@0 = y@1', p.pretty())
-  expect('forall x. exists y. x = y', str(p.simple_names()))
+  expect('forall x. exists y. x = y', p.simple_names().pretty())
 
   # Equality up to renaming
   mxy = Forall(F('x', lambda x: Forall(F('y', lambda y: Eq(x, y)))))
@@ -596,9 +591,9 @@ if __name__ == '__main__':
 
   p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y))))))))
   expect(set(), p.fvs())
-  expect('forall x. forall y. exists z. (y = y) * (x = y)', str(p.simple_names()))
+  expect('forall x. forall y. exists z. (y = y) * (x = y)', p.simple_names().pretty())
   p = simplify(p)
-  expect('forall x. forall y. x = y', str(p.simple_names()))
+  expect('forall x. forall y. x = y', p.simple_names().pretty())
 
   # Example 4: untyped LC
 
