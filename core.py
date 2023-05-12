@@ -94,7 +94,7 @@ def make_parser():
     @staticmethod
     def parses(s):
       '''
-      Returns the parses that pretty-print as s up to whitespace and extra parens.
+      Returns the parses that stringify to s up to whitespace and extra parens.
       '''
       nonlocal parser, transformer
       forest = parser.parse(s)
@@ -136,7 +136,7 @@ def make_parser():
     @staticmethod
     def parse(s):
       '''
-      Return the unique parse that pretty-prints as s up to whitespace and extra
+      Return the unique parse that stringifies to s up to whitespace and extra
       parens, if it exists.
       '''
       match Parser.parses(s):
