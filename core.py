@@ -1,6 +1,3 @@
-DEBUG = False
-debug = print if DEBUG else (lambda *xs: None)
-
 # ---------- Mixfix ----------
 
 def parens(s): return f'\\left({s}\\right)'
@@ -69,11 +66,8 @@ def make_parser():
       %ignore WS
     '''
   def make_parser(ps):
-    debug('making grammar')
-    debug(make_grammar(ps))
     return L.Lark(make_grammar(ps), start='term', ambiguity='explicit')
   def make_transformer(constructors):
-    debug('making transformer', constructors)
     class T(L.Transformer):
       def identifier(self, s):
         return V(Name(s[0].value))
@@ -93,7 +87,6 @@ def make_parser():
     @staticmethod
     def add_production(p):
       nonlocal productions, parser, transformer
-      debug('adding production', p)
       productions.append(p)
       parser = make_parser(productions)
       constructors[classname_to_nt(p[0].__name__)] = p[0]
@@ -132,14 +125,11 @@ def make_parser():
             return False
       parses = []
       for tree in L.visitors.CollapseAmbiguities().transform(forest):
-        debug('trying tree', tree)
-        debug('constructors', constructors)
         try: v = transformer.transform(tree)
         except: continue
         lhs = condense(s)
         rhs = condense(str(v))
         b = reducible_to(lhs, rhs)
-        debug(f'reducible_to({lhs}, {rhs}) = {b}')
         if b:
           parses.append(v)
       return parses
@@ -263,7 +253,6 @@ def mixfix(c):
   def simple_names(self, renaming={}, in_use=set()):
     return self.__class__(*(getattr(self, k).simple_names(renaming, in_use) for k in fields))
   def fvs(self):
-    debug(self, [(getattr(self, k), type(getattr(self, k))) for k in fields])
     return set(x for k in fields for x in getattr(self, k).fvs())
   def __repr__(self):
     args = ','.join(repr(getattr(self, k)) for k in fields)
@@ -274,8 +263,6 @@ def mixfix(c):
     def make_prec(field_name): return f'{name}.{field_name}' if field_name != name else name
     left_prec_inner = name
     right_prec_inner = make_prec(tuple(annotations.items())[-1][0]) # OK because annotations nonempty
-    debug(prec_order.graph)
-    debug(f'comparing {left_prec} <= {left_prec_inner} and {right_prec} <= {right_prec_inner} gives {prec_order.le(left_prec, left_prec_inner)} and {prec_order.le(right_prec, right_prec_inner)} = {prec_order.le(left_prec, left_prec_inner) and prec_order.le(right_prec, right_prec_inner)}')
     bracketing = not (prec_order.le(left_prec, left_prec_inner) and prec_order.le(right_prec, right_prec_inner))
     # (name of cursor position used to recur, corresponding field or None, string to append to output) for each entry in mixfix declaration
     precs = [('bot' if bracketing else name, None, '')] + list((make_prec(k), None if type(v) is Str else k, v) for (k, v) in annotations.items())
