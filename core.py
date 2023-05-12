@@ -154,8 +154,8 @@ def parse_mixfix(s):
 
 def mixfix(c):
   '''
-  The decorator @mixfix allows declaring an ABT (abstract binding tree)
-  constructor that additionally supports mixfix precedence-based parsing and
+  The decorator @mixfix allows declaring a binding-aware dataclass constructor
+  that additionally supports mixfix precedence-based parsing and
   pretty-printing.
   
   For example, to declare And(p, q) that parses and pretty-prints as p + q:
@@ -298,7 +298,7 @@ def mixfix(c):
   global_parser.add_production((c, [None if type(v) is not Str else v.parse for k, v in annotations.items()]))
   return c
 
-# ---------- Abstract binding trees ----------
+# ---------- Name binding ----------
 
 def nats():
   n = 0
@@ -347,6 +347,12 @@ class F:
   - F(x:Name, e) represents a term e with free variable x.
     Does not do any freshening.
   Pattern matching against an instance of F produces [x:Name, e:term] with x fresh.
+  Thererfore, while F instances are constructed by F('x', lambda x: e) and F(x, e),
+  they are pattern-matched against as F([x, e]). This is to ensure that the
+  fresh name and its body are extracted together. To support pattern F(x, e) would
+  require two different getters for the name and the body. Depending on the order
+  in which the getters are called during pattern matching, this could cause e to
+  be scoped with respect to a stale version of x.
   '''
   __match_args__ = ('unwrap',)
   def __init__(self, x, e=None):
