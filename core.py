@@ -69,7 +69,9 @@ def make_parser():
     return L.Lark(make_grammar(ps), start='term', ambiguity='explicit')
   def make_transformer(constructors):
     debug('making transformer', constructors)
-    class T(L.Transformer): pass
+    class T(L.Transformer):
+      def identifier(self, s):
+        return V(Name(s[0].value))
     for name, c in constructors.items():
       def go(name, c): # wrapper to get proper lexical scoping
         def transform(self, args):
@@ -95,6 +97,7 @@ def make_parser():
     def parses(s):
       '''
       Returns the parses that pretty-print as s up to whitespace.
+      Will return at most 1 parse so long as pretty-printing is injective.
       '''
       nonlocal parser, transformer
       forest = parser.parse(s)
@@ -314,6 +317,7 @@ class V:
   def __init__(self, x): self.x = x
   def __eq__(self, other, renaming={}): return renaming[self.x] == other.x if self.x in renaming else self.x == other.x
   def __repr__(self): return f'V({repr(self.x)})'
+  def __str__(self): return self.pretty()
   def fresh(self, renaming): return V(renaming[self.x]) if self.x in renaming else self
   def subst(self, substitution): return substitution[self.x] if self.x in substitution else self
   def simple_names(self, renaming={}, in_use=set()): return V(renaming[self.x]) if self.x in renaming else self
@@ -325,33 +329,39 @@ class F:
   A binding form. There are two ways to construct instances of F:
   - F('x', lambda x: e[x]) represents a term e with free variable x.
     Constructs a value F(Name('x', n), e[V(Name('x', n))]) with n fresh.
-  - F([x:Name, e]) represents a term e with free variable x.
+  - F(x:Name, e) represents a term e with free variable x.
     Does not do any freshening.
   Pattern matching against an instance of F produces [x:Name, e:term] with x fresh.
   '''
   __match_args__ = ('unwrap',)
-  def __init__(self, x, f=None):
-    if f is None:
-      [self.x, self.e] = x
-    else:
+  def __init__(self, x, e=None):
+    fn = type(lambda x: x)
+    if type(x) is str and type(e) is type(lambda x: x):
       self.x = Name(x).fresh()
-      self.e = f(V(self.x))
+      self.e = e(V(self.x))
+    elif type(x) is Name:
+      self.x = x
+      self.e = e
+    else:
+      raise ValueError(f'F({repr(x)}, {repr(e)})')
 
   def __repr__(self):
-    return f'F([{repr(self.x)}, {repr(self.e)}])'
+    return f'F({repr(self.x)}, {repr(self.e)})'
   
   def __eq__(self, other, renaming={}):
     return type(other) is F and self.e.__eq__(other.e, renaming | {self.x: other.x})
 
+  def __str__(self): return self.pretty()
+
   def fresh(self, renaming):
     x = self.x.fresh()
     e = self.e.fresh(renaming | {self.x: x})
-    return F([x, e])
+    return F(x, e)
 
   def subst(self, substitution):
     x = self.x.fresh()
     e = self.e.subst(substitution | {self.x: V(x)})
-    return F([x, e])
+    return F(x, e)
 
   def simple_names(self, renaming={}, in_use=set()):
     x = (
@@ -359,7 +369,7 @@ class F:
       next(self.x.with_n(n) for n in nats() if self.x.with_n(n) not in in_use)
     )
     e = self.e.simple_names(renaming | {self.x: x}, in_use | {x})
-    return F([x, e])
+    return F(x, e)
 
   def fvs(self):
     return self.e.fvs() - {self.x}
@@ -373,6 +383,7 @@ class F:
 
   def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
     return f"{str(self.x)}. {self.e.pretty('bot', right_prec, prec_order)}"
+global_parser.add_production((F, [None, ".", None]))
 
 # ---------- Examples ----------
 
@@ -505,6 +516,9 @@ if __name__ == '__main__':
   expect(True, mxy == muv)
   expect(False, mxy == muv_flip)
 
+  # Parsing of identifiers as variable names
+  expect(V(Name('a')), global_parser.parse('a'))
+
   # Example 3: pattern matching on ABTs
 
   def simplify(p):
@@ -514,11 +528,11 @@ if __name__ == '__main__':
       case Forall(F([x, p])):
         p = simplify(p)
         if x not in p.fvs(): return p
-        else: return Forall(F([x, p]))
+        else: return Forall(F(x, p))
       case Exists(F([x, p])):
         p = simplify(p)
         if x not in p.fvs(): return p
-        else: return Exists(F([x, p]))
+        else: return Exists(F(x, p))
       case Plus(p, q): return Plus(simplify(p), simplify(q))
       case Times(p, q):
         match simplify(p), simplify(q):
@@ -561,7 +575,7 @@ if __name__ == '__main__':
   class Stuck(Exception): pass
   def step(m):
     match m:
-      case Lam(F([x, m])): return Lam(F([x, step(m)]))
+      case Lam(F([x, m])): return Lam(F(x, step(m)))
       case App(Lam(F([x, m])), n): return m.subst({x: n})
       case App(m, n):
         try: return App(step(m), n)
