@@ -1,6 +1,6 @@
 # ---------- Mixfix decorator ----------
 
-def parens(s): return f'\\left({s}\\right)'
+def parens(s): return f'({s})'
 
 # Global poset on cursor positions used by pretty-printer (see help(mixfix))
 from poset import Poset
@@ -16,16 +16,23 @@ def prec_top(p): global_prec_order.add_top(to_prec(p))
 class Str:
   r'''
   Helper class used to specify string literals in mixfix declarations.
-  S(s) specifies the string literal s is to be used in both parsing and
-  pretty-printing.  Optionally, one can specify a different string literal t to
-  be used during parsing (e.g. to parse \x.e as a lambda term and pretty-print
-  it in LaTeX with \lambda) by S(s, parse=t) or S(s, t).
+  S(s) specifies the string literal s is to be used in parsing and pretty-printing with
+  .str(). Optionally, one can specify different string literals to be used for
+  different modes (e.g. to parse \x.e as a lambda term and pretty-print it in
+  LaTeX with \lambda) via keyword arguments. Concretely, S(s, pretty=t) declares
+  a string literal s for parsing and t for .str(mode='pretty').
 
   For example use of S see help(mixfix).
   '''
-  def __init__(self, pretty, parse=None):
-    self.pretty = pretty
-    self.parse = pretty if parse is None else parse
+  def __init__(self, s, **kwargs):
+    self.s = s
+    self.kvs = kwargs
+
+  def in_mode(self, mode):
+    if mode is None or mode not in self.kvs: return self.s
+    else: return self.kvs[mode]
+
+  def modes(self): return tuple(m for m in self.kvs)
 
 # Parser of highly ambiguous grammar updated by each invocation of @mixfix.
 def make_parser():
@@ -155,8 +162,7 @@ def parse_mixfix(s):
 def mixfix(c):
   '''
   The decorator @mixfix allows declaring a binding-aware dataclass constructor
-  that additionally supports mixfix precedence-based parsing and
-  pretty-printing.
+  that additionally supports mixfix precedence-based parsing and printing.
   
   For example, to declare And(p, q) that parses and pretty-prints as p + q:
     @mixfix
@@ -164,16 +170,17 @@ def mixfix(c):
       p: any
       plus: Str(' + ')
       q: any
-  By default, precedence mismatches are mediated by inserting parentheses using
-  parens(), but one can specify a different 'bracketer' using the optional field
-  'bracket', e.g.
+  By default and when printing as str(), precedence mismatches are mediated by
+  inserting parentheses using parens(). To change this behavior for other printing modes,
+  one can specify a custom 'bracketer' using the optional field 'bracket', e.g.
     @mixfix
     class Add:
       p: any
       plus: Str(' + ')
       q: any
-      bracket = lambda s: f'({s})'
-  to get ordinary parentheses instead of the LaTeX ones.
+      bracket = lambda mode, s: f'\\left({s}\\right)' if mode == 'tex' else paren(s)
+  to get ordinary parentheses instead of the LaTeX ones in mode 'tex'. It's not
+  possible to change the bracketer used by str(), as that would break the parser.
 
   Precedences are declared as a partial ordering on 'cursor positions', which
   correspond to positions in the string produced by pretty-printing. Each field
@@ -225,14 +232,16 @@ def mixfix(c):
   - fields x: t, z: tz, ... (fields with 'string literal type' omitted)
   - class properties x, y, z, ... for referring to cursor positions denoted by these fields
   - class property __match_args__ = ('x', 'z', ...) for pattern matching against instances of C
-  - method pretty() that pretty-prints an instance of C, omitting brackets as allowed by the global precedence order
   - method __repr__() that prints an instance of C for debugging
-  - method __str__(), like pretty() but prints with string literals specified for parsing so that parse(str(v)) == v
+  - method str() that prints an instance of C. Can be given a specific mode
+  - method __str__(), like str() but prints specifically in mode None
   - method __eq__() that tests equality up to renaming of bound variables
   - method fresh(renaming) that freshens all bound variables (instances of the class F) in each field
   - method subst(**substitution) that applies the given substitution
   - method simple_names(renaming, in_use) that maximally simplifies disambiguators on bound variable names
   - method fvs() that produces the free variables of an instance of C
+  - each pretty-printing mode becomes a method of C for printing in that mode
+  TODO tidy and move these docs into docstrings for the functions defined below
   '''
   name = c.__name__
   annotations = c.__annotations__
@@ -249,7 +258,7 @@ def mixfix(c):
     return f'{name}({args})'
   def __eq__(self, other, renaming={}):
     return type(self) is type(other) and all(getattr(self, k).__eq__(getattr(other, k), renaming) for k in fields)
-  def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order, get_str=lambda x: x.pretty):
+  def to_str(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order, mode=None):
     def make_prec(field_name): return f'{name}.{field_name}' if field_name != name else name
     left_prec_inner = name
     right_prec_inner = make_prec(tuple(annotations.items())[-1][0]) # OK because annotations nonempty
@@ -266,12 +275,12 @@ def mixfix(c):
     res = ''
     for (left_prec_inner, (k, v), right_prec_inner) in items:
       if k is not None:
-        res += getattr(self, k).pretty(left_prec_inner, right_prec_inner, prec_order, get_str)
+        res += getattr(self, k).str(left_prec_inner, right_prec_inner, prec_order, mode)
       else:
         assert type(v) is Str
-        res += get_str(v)
-    return self.__class__.bracket(res) if bracketing else res
-  def __str__(self): return self.pretty(get_str=lambda x: x.parse)
+        res += v.in_mode(mode)
+    return self.__class__.bracket(mode, res) if bracketing else res
+  def __str__(self): return self.str()
   def fresh(self, renaming):
     return self.__class__(*(getattr(self, k).fresh(renaming) for k in fields))
   def subst(self, substitution):
@@ -285,17 +294,24 @@ def mixfix(c):
   c.__repr__ = __repr__
   c.__eq__ = __eq__
   c.__str__ = __str__
-  c.pretty = pretty
+  c.str = to_str
   c.fresh = fresh
   c.subst = subst
   c.simple_names = simple_names
   c.fvs = fvs
   for k in annotations:
     setattr(c, k, f'{name}.{k}')
+  strs = tuple(v for _, v in annotations.items() if type(v) is Str)
+  possible_modes = (m for s in strs for m in s.modes())
+  modes = [m for m in possible_modes if all(m in s.modes() for s in strs)]
+  for mode in modes:
+    # Need this to get proper lexical scoping
+    def go(mode): setattr(c, mode, lambda self: self.str(mode=mode))
+    go(mode)
   if not hasattr(c, 'bracket'):
-    c.bracket = parens
+    c.bracket = lambda mode, s: parens(s)
   global global_parser
-  global_parser.add_production((c, [None if type(v) is not Str else v.parse for k, v in annotations.items()]))
+  global_parser.add_production((c, [None if type(v) is not Str else v.s for k, v in annotations.items()]))
   return c
 
 # ---------- Name binding ----------
@@ -332,12 +348,12 @@ class V:
   def __init__(self, x): self.x = x
   def __eq__(self, other, renaming={}): return renaming[self.x] == other.x if self.x in renaming else self.x == other.x
   def __repr__(self): return f'V({repr(self.x)})'
-  def __str__(self): return self.pretty()
+  def __str__(self): return self.str()
   def fresh(self, renaming): return V(renaming[self.x]) if self.x in renaming else self
   def subst(self, substitution): return substitution[self.x] if self.x in substitution else self
   def simple_names(self, renaming={}, in_use=set()): return V(renaming[self.x]) if self.x in renaming else self
   def fvs(self): return {self.x}
-  def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order, get_str=lambda x: x.pretty): return str(self.x)
+  def str(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order, mode=None): return str(self.x)
 
 class F:
   '''
@@ -372,7 +388,7 @@ class F:
   def __eq__(self, other, renaming={}):
     return type(other) is F and self.e.__eq__(other.e, renaming | {self.x: other.x})
 
-  def __str__(self): return self.pretty(get_str=lambda x: x.parse)
+  def __str__(self): return self.str()
 
   def fresh(self, renaming):
     x = self.x.fresh()
@@ -402,10 +418,10 @@ class F:
   def set_unwrap(self): assert False
   unwrap = property(get_unwrap, set_unwrap)
 
-  def pretty(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order, get_str=lambda x: x.pretty):
-    dot = Str('. ', '.')
-    return f"{str(self.x)}{get_str(dot)}{self.e.pretty('bot', right_prec, prec_order, get_str)}"
-  
+  def str(self, left_prec='bot', right_prec='bot', prec_order=global_prec_order, mode=None):
+    dot = '.' if mode is None else '. '
+    return f"{str(self.x)}{dot}{self.e.str('bot', right_prec, prec_order, mode)}"
+
   @staticmethod
   def transform(args):
     match args:
@@ -426,38 +442,32 @@ if __name__ == '__main__':
   #   (Usually, + and * also take precedence to the right of -> too, but leaving
   #   it out just to show you can)
 
-  simple_parens = lambda s: f'({s})'
-
   @mixfix
   class Top:
     s: Str('1')
-    bracket = simple_parens
   prec_top(Top)
   prec_top(Top.s)
 
   @mixfix
   class Times:
     p: any
-    times: Str(' * ', '*')
+    times: Str('*', pretty=' * ')
     q: any
-    bracket = simple_parens
   prec_ge(Times, Times.times) # right associative
 
   @mixfix
   class Plus:
     p: any
-    plus: Str(' + ', '+')
+    plus: Str('+', pretty=' + ')
     q: any
-    bracket = simple_parens
   prec_ge(Plus, Plus.plus) # right associative
   prec_ges([(Times, Plus), (Times.q, Plus.p), (Times.q, Plus.q)]) # * takes precedence over +
 
   @mixfix
   class Pow:
     p: any
-    to: Str(' -> ', '->')
+    to: Str('->', pretty=' -> ')
     q: any
-    bracket = simple_parens
   prec_ge(Pow, Pow.to) # right associative
   prec_ges([(Plus, Pow), (Plus.q, Pow.p)]) # + takes precedence on left of ->
   # Note: by transitivity, also get that * takes precedence on left of ->.
@@ -472,29 +482,29 @@ if __name__ == '__main__':
     except: pass
 
   # 1 requires no bracketing
-  expect('1 * 1', Times(Top(), Top()).pretty())
+  expect('1 * 1', Times(Top(), Top()).str(mode='pretty'))
   # * is right-associative
-  expect('1 * 1 * 1', Times(Top(), Times(Top(), Top())).pretty())
-  expect('(1 * 1) * 1', Times(Times(Top(), Top()), Top()).pretty())
+  expect('1 * 1 * 1', Times(Top(), Times(Top(), Top())).str(mode='pretty'))
+  expect('(1 * 1) * 1', Times(Times(Top(), Top()), Top()).str(mode='pretty'))
   # + is right-associative
-  expect('1 + 1 + 1', Plus(Top(), Plus(Top(), Top())).pretty())
-  expect('(1 + 1) + 1', Plus(Plus(Top(), Top()), Top()).pretty())
+  expect('1 + 1 + 1', Plus(Top(), Plus(Top(), Top())).str(mode='pretty'))
+  expect('(1 + 1) + 1', Plus(Plus(Top(), Top()), Top()).str(mode='pretty'))
   # * takes precedence over +
-  expect('1 * (1 + 1)', Times(Top(), Plus(Top(), Top())).pretty())
-  expect('(1 + 1) * 1', Times(Plus(Top(), Top()), Top()).pretty())
-  expect('1 + 1 * 1', Plus(Top(), Times(Top(), Top())).pretty())
-  expect('1 * 1 + 1', Plus(Times(Top(), Top()), Top()).pretty())
+  expect('1 * (1 + 1)', Times(Top(), Plus(Top(), Top())).str(mode='pretty'))
+  expect('(1 + 1) * 1', Times(Plus(Top(), Top()), Top()).str(mode='pretty'))
+  expect('1 + 1 * 1', Plus(Top(), Times(Top(), Top())).str(mode='pretty'))
+  expect('1 * 1 + 1', Plus(Times(Top(), Top()), Top()).str(mode='pretty'))
   # -> is right-associative
-  expect('1 -> 1 -> 1', Pow(Top(), Pow(Top(), Top())).pretty())
-  expect('(1 -> 1) -> 1', Pow(Pow(Top(), Top()), Top()).pretty())
+  expect('1 -> 1 -> 1', Pow(Top(), Pow(Top(), Top())).str(mode='pretty'))
+  expect('(1 -> 1) -> 1', Pow(Pow(Top(), Top()), Top()).str(mode='pretty'))
   # * and + take precedence over -> on left
-  expect('1 * 1 -> 1', Pow(Times(Top(), Top()), Top()).pretty())
-  expect('1 * (1 -> 1)', Times(Top(), Pow(Top(), Top())).pretty())
-  expect('1 + 1 -> 1', Pow(Plus(Top(), Top()), Top()).pretty())
-  expect('1 + (1 -> 1)', Plus(Top(), Pow(Top(), Top())).pretty())
+  expect('1 * 1 -> 1', Pow(Times(Top(), Top()), Top()).str(mode='pretty'))
+  expect('1 * (1 -> 1)', Times(Top(), Pow(Top(), Top())).str(mode='pretty'))
+  expect('1 + 1 -> 1', Pow(Plus(Top(), Top()), Top()).str(mode='pretty'))
+  expect('1 + (1 -> 1)', Plus(Top(), Pow(Top(), Top())).str(mode='pretty'))
   # * and + do NOT take precedence over -> on right
-  expect('1 -> (1 * 1)', Pow(Top(), Times(Top(), Top())).pretty())
-  expect('1 -> (1 + 1)', Pow(Top(), Plus(Top(), Top())).pretty())
+  expect('1 -> (1 * 1)', Pow(Top(), Times(Top(), Top())).str(mode='pretty'))
+  expect('1 -> (1 + 1)', Pow(Top(), Plus(Top(), Top())).str(mode='pretty'))
 
   # Thanks to precedences, the following strings parse unambiguously
   expect(Plus(Top(), Top()), global_parser.parse('1 + 1'))
@@ -523,27 +533,24 @@ if __name__ == '__main__':
 
   @mixfix
   class Forall:
-    forall: Str('∀ ', 'forall ')
+    forall: Str('forall ', pretty='∀ ')
     xp: F
-    bracket = simple_parens
   @mixfix
   class Exists:
-    forall: Str('∃ ', 'exists ')
+    forall: Str('exists ', pretty='∃ ')
     xp: F
-    bracket = simple_parens
   prec_ges([(Forall.xp, Exists.xp), (Exists.xp, Forall.xp)])
   @mixfix
   class Eq:
     m: any
-    eq: Str(' = ', '=')
+    eq: Str('=', pretty=' = ')
     n: any
-    bracket = simple_parens
   prec_ge(Eq.n, Exists.xp) # by transitivity, Eq.n >= Forall.xp
   prec_ge(Times.q, Exists.xp)
 
   p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
-  expect('∀ x@0. ∃ y@1. x@0 = y@1', p.pretty())
-  expect('∀ x. ∃ y. x = y', p.simple_names().pretty())
+  expect('∀ x@0. ∃ y@1. x@0 = y@1', p.str(mode='pretty'))
+  expect('∀ x. ∃ y. x = y', p.simple_names().str(mode='pretty'))
 
   # Equality up to renaming
   mxy = Forall(F('x', lambda x: Forall(F('y', lambda y: Eq(x, y)))))
@@ -603,34 +610,32 @@ if __name__ == '__main__':
 
   p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Times(Eq(x, y), Eq(z, z)))))))))
   expect(set(), p.fvs())
-  expect('∀ x. ∀ y. ∃ z. (y = y) * (x = y) * (z = z)', p.simple_names().pretty())
+  expect('∀ x. ∀ y. ∃ z. (y = y) * (x = y) * (z = z)', p.simple_names().str(mode='pretty'))
   p = simplify(p)
-  expect('∀ x. ∀ y. x = y', p.simple_names().pretty())
+  expect('∀ x. ∀ y. x = y', p.simple_names().str(mode='pretty'))
 
   # Example 4: untyped LC
 
   @mixfix
   class Lam:
-    lam: Str('λ', '\\')
+    lam: Str('\\', pretty='λ')
     m: F
-    bracket = simple_parens
   @mixfix
   class App:
     m: any
-    app: Str(' ', '')
+    app: Str('', pretty=' ')
     n: any
-    bracket = simple_parens
   prec_ge(App.n, App.m) # left-associative
   prec_ge(App.n, Lam.m) # application binds stronger than λ
 
   # str uses \ and condensed . while pretty uses λ
   id = Lam(F('x', lambda x: x))
-  expect('λx. x', id.simple_names().pretty())
+  expect('λx. x', id.simple_names().str(mode='pretty'))
   expect(r'\x.x', str(id.simple_names()))
 
   # Check printing of function applications
-  expect('(λx. x) ((λx. x) (λx. x))', App(id, App(id, id)).simple_names().pretty())
-  expect('(λx. x) (λx. x) (λx. x)', App(App(id, id), id).simple_names().pretty())
+  expect('(λx. x) ((λx. x) (λx. x))', App(id, App(id, id)).simple_names().str(mode='pretty'))
+  expect('(λx. x) (λx. x) (λx. x)', App(App(id, id), id).simple_names().str(mode='pretty'))
 
   # One-step CBN reduction
   class Stuck(Exception): pass
@@ -643,23 +648,23 @@ if __name__ == '__main__':
         except Stuck: return App(m, step(n))
       case V(x): raise Stuck()
 
-  expect('λx. x', step(App(id, id)).simple_names().pretty())
+  expect('λx. x', step(App(id, id)).simple_names().str(mode='pretty'))
 
   # Check capture-avoiding substitution on \y. (\x. \y. x) y
   k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
   v = lambda y: y
   m = Lam(F('y', lambda y: App(k(y), v(y))))
-  expect('λy. (λx. λy@0. x) y', m.simple_names().pretty())
+  expect('λy. (λx. λy@0. x) y', m.simple_names().str(mode='pretty'))
   m = step(m)
-  expect('λy. λy@0. y', m.simple_names().pretty())
+  expect('λy. λy@0. y', m.simple_names().str(mode='pretty'))
 
   # Omega Omega -> Omega Omega
   omega = Lam(F('x', lambda x: App(x, x)))
-  expect('λx. x x', omega.simple_names().pretty())
+  expect('λx. x x', omega.simple_names().str(mode='pretty'))
   omega2 = App(omega, omega)
-  expect('(λx. x x) (λx. x x)', omega2.simple_names().pretty())
+  expect('(λx. x x) (λx. x x)', omega2.simple_names().str(mode='pretty'))
   omega2 = step(omega2)
-  expect('(λx. x x) (λx. x x)', omega2.simple_names().pretty())
+  expect('(λx. x x) (λx. x x)', omega2.simple_names().str(mode='pretty'))
 
   # Parsing
   expect(omega, global_parser.parse(r'\x. x x'))
