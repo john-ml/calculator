@@ -44,7 +44,12 @@ def make_parser():
   #   (C, [None, "+", None])
   def make_grammar(ps):
     # TODO could construct the grammar more intelligently using the precedence
-    # poset so there are fewer ambiguities to deal with
+    # poset to cut down the number of ambiguities. Essentially each cursor
+    # position can become a nonterminal that only references nonterminals
+    # corresponding to cursor positions that are higher up in the poset.
+    # Incomparable connected components of cursor positions should produce
+    # completely independent grammars, and annotations enforcing operator
+    # precedence and associativity should produce properly-factored ones.
     escape = lambda s: f'"{repr(s)[1:-1]}"'
     lines = ''.join(
       f'\n      | {" ".join("term" if s is None else escape(s) for s in p)} -> {classname_to_nt(c.__name__)}' for c, p in ps
