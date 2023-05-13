@@ -630,7 +630,7 @@ if __name__ == '__main__':
   expect('(λx. x) ((λx. x) (λx. x))', App(id, App(id, id)).simple_names().str('pretty'))
   expect('(λx. x) (λx. x) (λx. x)', App(App(id, id), id).simple_names().str('pretty'))
 
-  # One-step CBN reduction
+  # One-step reduction
   class Stuck(Exception): pass
   def step(m):
     match m:
