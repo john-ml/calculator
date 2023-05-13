@@ -95,7 +95,7 @@ prog = Prog()
 
 @app.route('/', methods = ['GET'])
 def main():
-  return F.render_template('index.html')
+  return FL.render_template('index.html')
 
 @app.route('/input', methods = ['POST'])
 def on_input():

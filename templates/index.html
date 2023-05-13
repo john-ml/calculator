@@ -65,7 +65,8 @@
         } break;
         case 'Enter': {
           let command = input.innerHTML;
-          history.push(command);
+          if (history.length === 0 || history[history.length-1] !== command)
+            history.push(command);
           history_cursor = history.length;
           fetch('input', {
             method: 'POST',
