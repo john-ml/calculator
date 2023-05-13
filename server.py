@@ -105,6 +105,7 @@ def on_input():
   print('Received input:', s)
   try:
     m = S.global_parser.parse(s)
+    # steps = '\\longrightarrow '.join(n.str("tex") for n in trace(m, bound=30))
     steps = '\\longrightarrow '.join(n.simple_names().str("tex") for n in trace(m, bound=30))
     return f'$\\displaystyle {steps}$'
   except Exception as e: return repr(e)

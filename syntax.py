@@ -141,8 +141,7 @@ def make_parser():
     @staticmethod
     def parse(s):
       '''
-      Return the unique parse that stringifies to s up to whitespace and extra
-      parens, if it exists.
+      Returns the unique parse yielded by parses(), if it exists.
       '''
       match Parser.parses(s):
         case []: raise ValueError(f'No parse for {s}')
@@ -281,11 +280,12 @@ def mixfix(c):
         res += v.in_mode(mode)
     return self.__class__.bracket(mode, res) if bracketing else res
   def __str__(self): return self.str(None)
-  def fresh(self, renaming):
+  def fresh(self, renaming={}):
     return self.__class__(*(getattr(self, k).fresh(renaming) for k in fields))
   def subst(self, substitution):
     return self.__class__(*(getattr(self, k).subst(substitution) for k in fields))
-  def simple_names(self, renaming={}, in_use=set()):
+  def simple_names(self, renaming={}, in_use=None):
+    if in_use is None: in_use = set(v for _, v in renaming.items())
     return self.__class__(*(getattr(self, k).simple_names(renaming, in_use) for k in fields))
   def fvs(self):
     return set(x for k in fields for x in getattr(self, k).fvs())
@@ -342,9 +342,9 @@ class V:
   def __eq__(self, other, renaming={}): return renaming[self.x] == other.x if self.x in renaming else self.x == other.x
   def __repr__(self): return f'V({repr(self.x)})'
   def __str__(self): return self.str(None)
-  def fresh(self, renaming): return V(renaming[self.x]) if self.x in renaming else self
+  def fresh(self, renaming={}): return V(renaming[self.x]) if self.x in renaming else self
   def subst(self, substitution): return substitution[self.x] if self.x in substitution else self
-  def simple_names(self, renaming={}, in_use=set()): return V(renaming[self.x]) if self.x in renaming else self
+  def simple_names(self, renaming={}, in_use=None): return V(renaming[self.x]) if self.x in renaming else self
   def fvs(self): return {self.x}
   def str(self, mode, left_prec='bot', right_prec='bot', prec_order=global_prec_order): return str(self.x)
 
@@ -383,7 +383,7 @@ class F:
 
   def __str__(self): return self.str(None)
 
-  def fresh(self, renaming):
+  def fresh(self, renaming={}):
     x = self.x.fresh()
     e = self.e.fresh(renaming | {self.x: x})
     return F(x, e)
@@ -393,7 +393,9 @@ class F:
     e = self.e.subst(substitution | {self.x: V(x)})
     return F(x, e)
 
-  def simple_names(self, renaming={}, in_use=set()):
+  def simple_names(self, renaming={}, in_use=None):
+    if in_use is None: in_use = set(v for _, v in renaming.items())
+    in_use |= self.fvs()
     x = (
       self.x.with_n(None) if self.x.with_n(None) not in in_use else
       next(self.x.with_n(n) for n in nats() if self.x.with_n(n) not in in_use)
@@ -405,7 +407,7 @@ class F:
     return self.e.fvs() - {self.x}
 
   def get_unwrap(self):
-    e = self.fresh({})
+    e = self.fresh()
     res = [e.x, e.e]
     return res
   def set_unwrap(self): assert False
