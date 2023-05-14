@@ -63,6 +63,8 @@ def trace(m, bound=10):
     except Stuck: break
   return res
 
+def P(s): return S.global_parser.parse(s)
+
 class Prog:
   def __init__(self):
     self.state = []
@@ -99,8 +101,8 @@ def main():
 
 @app.route('/input', methods = ['POST'])
 def on_input():
-  from html import unescape
-  s = unescape(FL.request.data.decode('utf-8'))
+  import html as H
+  s = H.unescape(FL.request.data.decode('utf-8'))
   if s.endswith('<br>'): s = s[:-len('<br>')]
   print('Received input:', s)
   try:
@@ -108,7 +110,8 @@ def on_input():
     # steps = '\\longrightarrow '.join(n.str("tex") for n in trace(m, bound=30))
     steps = '\\longrightarrow '.join(n.simple_names().str("tex") for n in trace(m, bound=30))
     return f'$\\displaystyle {steps}$'
-  except Exception as e: return repr(e)
+  except Exception as e:
+    return H.escape(str(e))
   # except Exception as e: return repr(e)
   # try: return prog.on_input(s.split())
   # try: return prog.tex(s)
@@ -117,3 +120,7 @@ def on_input():
 
 if __name__ == '__main__':
   app.run()
+
+# (\f. (\x. x) x)
+# \f. (\x. x) x
+# (\f. \x. x) x
