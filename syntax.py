@@ -403,10 +403,10 @@ class F:
 
   def simple_names(self, renaming={}, in_use=None):
     if in_use is None: in_use = set(v for _, v in renaming.items())
-    in_use |= self.fvs()
+    banned = in_use | self.fvs()
     x = (
-      self.x.with_n(None) if self.x.with_n(None) not in in_use else
-      next(self.x.with_n(n) for n in nats() if self.x.with_n(n) not in in_use)
+      self.x.with_n(None) if self.x.with_n(None) not in banned else
+      next(self.x.with_n(n) for n in nats() if self.x.with_n(n) not in banned)
     )
     e = self.e.simple_names(renaming | {self.x: x}, in_use | {x})
     return F(x, e)
