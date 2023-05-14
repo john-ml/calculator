@@ -61,7 +61,7 @@ def make_parser():
     )
     return f'''
       ?term : atom{lines}
-      | "(" term ")"
+      | "(" term ")" -> parens
   
       ?atom : CNAME -> identifier
       | ESCAPED_STRING -> string
@@ -75,10 +75,29 @@ def make_parser():
     '''
   def make_parser(ps):
     return L.Lark(make_grammar(ps), start='term', ambiguity='explicit')
+  class Parens:
+    '''
+    An explicit parenthesization.
+    Used only by the parser to match strings up to the insertion of superfluous
+    parentheses. Removed (recursively) from syntax trees by no_parens(). Users
+    should never see instances of this class.
+    '''
+    __match_args__ = ('x',)
+    def __init__(self, x): self.x = x
+    def __eq__(self, other): return self.x == other.x
+    def __repr__(self): return f'Parens({repr(self.x)})'
+    def __str__(self): return self.str(None)
+    def fresh(self, renaming={}): assert False
+    def subst(self, substitution): assert False
+    def simple_names(self, renaming={}, in_use=None): assert False
+    def fvs(self): assert False
+    def no_parens(self): return self.x.no_parens()
+    def str(self, mode, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
+      return '(' + self.x.str(mode, left_prec='bot', right_prec='bot', prec_order=prec_order) + ')'
   def make_transformer(constructors):
     class T(L.Transformer):
-      def identifier(self, s):
-        return V(Name(s[0].value))
+      def identifier(self, s): return V(Name(s[0].value))
+      def parens(self, s): return Parens(s[0])
     for name, c in constructors.items():
       def go(name, c): # wrapper to get proper lexical scoping
         def transform(self, args):
@@ -91,51 +110,6 @@ def make_parser():
   # invariant: the 2 equalities below always hold
   parser = make_parser(productions)
   transformer = make_transformer(constructors)
-  # Check if t is a version of s with extraneous parens removed, up to whitespace
-  # Used in Parser below
-  sexp_grammar = '''
-    top : term*
-    term : STRING -> string
-          | "(" term* ")" -> parens
-    STRING: /[^()]+/
-  '''
-  class Sexp(L.Transformer):
-    string = lambda self, s: s[0].value
-    parens = lambda self, args: args
-    top = lambda self, args: args
-  sexp_parser = L.Lark(sexp_grammar, start='top', parser='lalr', transformer=Sexp())
-  def reducible_to(s, t):
-    remove_whitespace = lambda s: ''.join(s.split())
-    s = remove_whitespace(s)
-    t = remove_whitespace(t)
-    m = sexp_parser.parse(s)
-    n = sexp_parser.parse(t)
-    class Graph:
-      def __init__(self, tree):
-        self.subtree = []
-        self.parent = []
-        self.children = []
-        self.nodes = 0
-        def go(tree, parent):
-          nonlocal self
-          self.subtree.append(tree)
-          self.parent.append(parent)
-          self.children.append([])
-          if parent is not None:
-            self.children[parent].append(self.nodes)
-          node = self.nodes
-          self.nodes += 1
-          if type(tree) is list:
-            for t in tree:
-              go(t, node)
-        go(tree, None)
-      def rooted_map_into(self, g):
-        return None
-    g = Graph(m)
-    h = Graph(n)
-    return False
-  # print(reducible_to('((ab)c)', '(ab)c'))
-  print(reducible_to('((ab)(cd))', '(abcd)'))
   class Parser:
     @staticmethod
     def add_production(p):
@@ -159,8 +133,12 @@ def make_parser():
         seen.add(tree)
         try: v = transformer.transform(tree)
         except: continue
-        reducible = reducible_to(s, str(v))
-        if reducible:
+        remove_whitespace = lambda s: ''.join(s.split())
+        lhs = remove_whitespace(s)
+        rhs = remove_whitespace(str(v))
+        lhs_matches_rhs = lhs == rhs
+        if lhs_matches_rhs:
+          v = v.no_parens()
           parses.append(v)
       return parses
     @staticmethod
@@ -264,6 +242,7 @@ def mixfix(c):
   - method subst(**substitution) that applies the given substitution
   - method simple_names(renaming, in_use) that maximally simplifies disambiguators on bound variable names
   - method fvs() that produces the free variables of an instance of C
+  - method no_parens() that removes Paren instances from subtrees
   - each pretty-printing mode becomes a method of C for printing in that mode
   TODO tidy and move these docs into docstrings for the functions defined below
   '''
@@ -314,6 +293,8 @@ def mixfix(c):
     return self.__class__(*(getattr(self, k).simple_names(renaming, in_use) for k in fields))
   def fvs(self):
     return set(x for k in fields for x in getattr(self, k).fvs())
+  def no_parens(self):
+    return self.__class__(*(getattr(self, k).no_parens() for k in fields))
   c.__init__ = __init__
   c.__match_args__ = fields
   c.__repr__ = __repr__
@@ -324,6 +305,7 @@ def mixfix(c):
   c.subst = subst
   c.simple_names = simple_names
   c.fvs = fvs
+  c.no_parens = no_parens
   for k in annotations:
     setattr(c, k, f'{name}.{k}')
   if not hasattr(c, 'bracket'):
@@ -371,6 +353,7 @@ class V:
   def subst(self, substitution): return substitution[self.x] if self.x in substitution else self
   def simple_names(self, renaming={}, in_use=None): return V(renaming[self.x]) if self.x in renaming else self
   def fvs(self): return {self.x}
+  def no_parens(self): return self
   def str(self, mode, left_prec='bot', right_prec='bot', prec_order=global_prec_order): return str(self.x)
 
 class F:
@@ -430,6 +413,8 @@ class F:
 
   def fvs(self):
     return self.e.fvs() - {self.x}
+
+  def no_parens(self): return F(self.x, self.e.no_parens())
 
   def get_unwrap(self):
     e = self.fresh()
@@ -501,46 +486,46 @@ if __name__ == '__main__':
       raise ValueError(f'Instead of exception got {v}')
     except: pass
 
-  # # 1 requires no bracketing
-  # expect('1 * 1', Times(Top(), Top()).str('pretty'))
-  # # * is right-associative
-  # expect('1 * 1 * 1', Times(Top(), Times(Top(), Top())).str('pretty'))
-  # expect('(1 * 1) * 1', Times(Times(Top(), Top()), Top()).str('pretty'))
-  # # + is right-associative
-  # expect('1 + 1 + 1', Plus(Top(), Plus(Top(), Top())).str('pretty'))
-  # expect('(1 + 1) + 1', Plus(Plus(Top(), Top()), Top()).str('pretty'))
-  # # * takes precedence over +
-  # expect('1 * (1 + 1)', Times(Top(), Plus(Top(), Top())).str('pretty'))
-  # expect('(1 + 1) * 1', Times(Plus(Top(), Top()), Top()).str('pretty'))
-  # expect('1 + 1 * 1', Plus(Top(), Times(Top(), Top())).str('pretty'))
-  # expect('1 * 1 + 1', Plus(Times(Top(), Top()), Top()).str('pretty'))
-  # # -> is right-associative
-  # expect('1 -> 1 -> 1', Pow(Top(), Pow(Top(), Top())).str('pretty'))
-  # expect('(1 -> 1) -> 1', Pow(Pow(Top(), Top()), Top()).str('pretty'))
-  # # * and + take precedence over -> on left
-  # expect('1 * 1 -> 1', Pow(Times(Top(), Top()), Top()).str('pretty'))
-  # expect('1 * (1 -> 1)', Times(Top(), Pow(Top(), Top())).str('pretty'))
-  # expect('1 + 1 -> 1', Pow(Plus(Top(), Top()), Top()).str('pretty'))
-  # expect('1 + (1 -> 1)', Plus(Top(), Pow(Top(), Top())).str('pretty'))
-  # # * and + do NOT take precedence over -> on right
-  # expect('1 -> (1 * 1)', Pow(Top(), Times(Top(), Top())).str('pretty'))
-  # expect('1 -> (1 + 1)', Pow(Top(), Plus(Top(), Top())).str('pretty'))
+  # 1 requires no bracketing
+  expect('1 * 1', Times(Top(), Top()).str('pretty'))
+  # * is right-associative
+  expect('1 * 1 * 1', Times(Top(), Times(Top(), Top())).str('pretty'))
+  expect('(1 * 1) * 1', Times(Times(Top(), Top()), Top()).str('pretty'))
+  # + is right-associative
+  expect('1 + 1 + 1', Plus(Top(), Plus(Top(), Top())).str('pretty'))
+  expect('(1 + 1) + 1', Plus(Plus(Top(), Top()), Top()).str('pretty'))
+  # * takes precedence over +
+  expect('1 * (1 + 1)', Times(Top(), Plus(Top(), Top())).str('pretty'))
+  expect('(1 + 1) * 1', Times(Plus(Top(), Top()), Top()).str('pretty'))
+  expect('1 + 1 * 1', Plus(Top(), Times(Top(), Top())).str('pretty'))
+  expect('1 * 1 + 1', Plus(Times(Top(), Top()), Top()).str('pretty'))
+  # -> is right-associative
+  expect('1 -> 1 -> 1', Pow(Top(), Pow(Top(), Top())).str('pretty'))
+  expect('(1 -> 1) -> 1', Pow(Pow(Top(), Top()), Top()).str('pretty'))
+  # * and + take precedence over -> on left
+  expect('1 * 1 -> 1', Pow(Times(Top(), Top()), Top()).str('pretty'))
+  expect('1 * (1 -> 1)', Times(Top(), Pow(Top(), Top())).str('pretty'))
+  expect('1 + 1 -> 1', Pow(Plus(Top(), Top()), Top()).str('pretty'))
+  expect('1 + (1 -> 1)', Plus(Top(), Pow(Top(), Top())).str('pretty'))
+  # * and + do NOT take precedence over -> on right
+  expect('1 -> (1 * 1)', Pow(Top(), Times(Top(), Top())).str('pretty'))
+  expect('1 -> (1 + 1)', Pow(Top(), Plus(Top(), Top())).str('pretty'))
 
-  # # Thanks to precedences, the following strings parse unambiguously
-  # expect(Plus(Top(), Top()), global_parser.parse('1 + 1'))
-  # expect(Plus(Top(), Plus(Top(), Top())), global_parser.parse('1 + 1 + 1'))
-  # expect(Plus(Plus(Top(), Top()), Top()), global_parser.parse('(1 + 1) + 1'))
-  # expect(Plus(Times(Top(), Top()), Top()), global_parser.parse('1 * 1 + 1'))
-  # expect(Plus(Pow(Top(), Top()), Top()), global_parser.parse('(1 -> 1) + 1'))
-  # expect(Times(Top(), Times(Top(), Top())), global_parser.parse('1 * 1 * 1'))
-  # expect(Pow(Top(), Pow(Top(), Top())), global_parser.parse('1 -> 1 -> 1'))
+  # Thanks to precedences, the following strings parse unambiguously
+  expect(Plus(Top(), Top()), global_parser.parse('1 + 1'))
+  expect(Plus(Top(), Plus(Top(), Top())), global_parser.parse('1 + 1 + 1'))
+  expect(Plus(Plus(Top(), Top()), Top()), global_parser.parse('(1 + 1) + 1'))
+  expect(Plus(Times(Top(), Top()), Top()), global_parser.parse('1 * 1 + 1'))
+  expect(Plus(Pow(Top(), Top()), Top()), global_parser.parse('(1 -> 1) + 1'))
+  expect(Times(Top(), Times(Top(), Top())), global_parser.parse('1 * 1 * 1'))
+  expect(Pow(Top(), Pow(Top(), Top())), global_parser.parse('1 -> 1 -> 1'))
 
-  # # * and + need parens to right of ->
-  # raises(lambda: global_parser.parse('1 -> 1 + 1'))
-  # raises(lambda: global_parser.parse('1 -> 1 * 1'))
+  # * and + need parens to right of ->
+  raises(lambda: global_parser.parse('1 -> 1 + 1'))
+  raises(lambda: global_parser.parse('1 -> 1 * 1'))
 
-  # # Superfluous parentheses are allowed
-  # expect(Plus(Top(), Plus(Top(), Top())), global_parser.parse('1 + (1 + 1)'))
+  # Superfluous parentheses are allowed
+  expect(Plus(Top(), Plus(Top(), Top())), global_parser.parse('1 + (1 + 1)'))
   expect(Plus(Plus(Top(), Top()), Top()), global_parser.parse('((1 + 1) + 1)'))
   expect(Plus(Plus(Top(), Top()), Top()), global_parser.parse('(((1 + 1)) + (1))'))
 
@@ -694,3 +679,9 @@ if __name__ == '__main__':
   # Even though the production for App is term -> term term, this still has a
   # unique parse because parsing of identifiers always takes the longest match
   expect(V(Name('xy')), global_parser.parse(r'xy'))
+
+  # Recognizes the outer parens as superfluous and spaces unnecessary
+  expect(
+    Lam(F('f', lambda f: App(Lam(F('x', lambda x: x)), f))),
+    global_parser.parse(r'(\f.(\x.x)f)')
+  )

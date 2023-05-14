@@ -120,7 +120,3 @@ def on_input():
 
 if __name__ == '__main__':
   app.run()
-
-# (\f. (\x. x) x)
-# \f. (\x. x) x
-# (\f. \x. x) x
