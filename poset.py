@@ -34,10 +34,14 @@ class Poset:
     '''Recompute the transitive closure.'''
     if self.good_closure: return
     self.closure = N.DiGraph(self.graph)
-    self.closure.add_edges_from([('bot', v) for v in self.closure.nodes])
-    self.closure.add_edges_from([(v, 'top') for v in self.closure.nodes])
-    self.closure.add_edges_from((v, 'bot') for v in self.bots)
-    self.closure.add_edges_from(('top', v) for v in self.tops)
+    if len(self.bots) > 0:
+      bot = next(iter(self.bots))
+      self.closure.add_edges_from([(bot, v) for v in self.closure.nodes])
+      self.closure.add_edges_from((v, bot) for v in self.bots)
+    if len(self.tops) > 0:
+      top = next(iter(self.tops))
+      self.closure.add_edges_from([(v, top) for v in self.closure.nodes])
+      self.closure.add_edges_from((top, v) for v in self.tops)
     self.closure = N.transitive_closure(self.closure, reflexive=True)
     self.good_closure = True
   def make_skeleton(self):
