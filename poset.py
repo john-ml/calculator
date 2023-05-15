@@ -95,14 +95,14 @@ class Poset:
   def canon(self, x):
     '''
     Return the SCC-equivalence-class containing x, represented as a frozenset()
-    of vertices.
+    of poset elements.
     '''
     self.make_closure()
     return self.partition[x]
   def succs(self, eclass):
     '''
-    Given an SCC-equivalence-class, represented as a frozenset() of vertices,
-    return its successors in the skeleton.
+    Given an SCC-equivalence-class, represented as a frozenset() of poset
+    elements, return its successors in the skeleton.
     '''
     self.make_closure()
     return self.skeleton.successors(eclass)
