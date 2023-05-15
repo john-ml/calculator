@@ -20,7 +20,7 @@ class Poset:
     # Invariant:
     #   good_closure ==>
     #     closure is Kleene closure of graph
-    #     with bot elements self.bots ∪ {'bot'} and top elements self.tops ∪ {'top'}
+    #     with bot elements self.bots and top elements self.tops
     #   good_skeleton ==>
     #     partition[v] gives SCC-equivalence-class of v in closure
     #     and skeleton gives DAG of SCC-equivalence-classes with no transitive edges
