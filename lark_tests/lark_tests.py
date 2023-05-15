@@ -105,7 +105,8 @@ term_parser = Lark(r'''
   ?term : lam | app
   ?app1 : atom
   ?app : app app1 | app1
-  ?lam : "λ" name "." lam1
+  f_lam : name "." lam1
+  lam : "λ" f_lam
   ?lam1 : lam | app
   ?atom : name
        | "(" term ")"
@@ -114,9 +115,11 @@ term_parser = Lark(r'''
   %import common.WS
   %ignore WS
 ''', start='term', parser='lalr')
-ts = term_parser.parse(r'λx.x')
+ts = term_parser.parse('λx.x')
 print(ts.pretty())
-ts = term_parser.parse(r'λx.λy.xy')
+ts = term_parser.parse('λx.λy.xy')
 print(ts.pretty())
-ts = term_parser.parse(r'λf.λg.λx.fx(gx)')
+ts = term_parser.parse('λf.λg.λx.fx(gx)')
+print(ts.pretty())
+ts = term_parser.parse('(λy.λp.p)(λf.(λx.f(xx))(λx.f(xx)))(λn.n(λt.λf.t)(λn.λt.λf.f))')
 print(ts.pretty())
