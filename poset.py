@@ -48,6 +48,12 @@ class Poset:
     '''Recompute the skeleton.'''
     if self.good_skeleton: return
     self.make_closure()
+    # Skeleton is computed in two steps:
+    #   1. Take the transitive closure and contract SCCs into points.
+    #      This also gets rid of any self-loops, so the result is a dag G.
+    #      G is transitively closed, so x->y in G iff there is a nontrivial path from x to y in G.
+    #   3. Skeleton is G - G^2 where G^2 consists of edges corresponding to paths of length > 1 in G.
+    #      Intuitively this leaves only paths x->y in G that are not made from paths of length > 1.
     partition = tuple(N.strongly_connected_components(self.closure))
     self.partition = {x: eclass for eclass in partition for x in eclass}
     g = N.quotient_graph(self.closure, partition, create_using=N.DiGraph)
