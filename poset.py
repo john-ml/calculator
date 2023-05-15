@@ -98,14 +98,14 @@ class Poset:
     Return the SCC-equivalence-class containing x, represented as a frozenset()
     of poset elements.
     '''
-    self.make_closure()
+    self.make_skeleton()
     return self.partition[x]
   def succs(self, eclass):
     '''
     Given an SCC-equivalence-class, represented as a frozenset() of poset
     elements, return its successors in the skeleton.
     '''
-    self.make_closure()
+    self.make_skeleton()
     return self.skeleton.successors(eclass)
 
 if __name__ == '__main__':
