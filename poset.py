@@ -1,37 +1,38 @@
+import networkx as N
+
 class Poset:
   def __init__(self):
-    self.graph = set()
     self.bots = set()
     self.tops = set()
+    # Invariant:
+    #   up_to_date ==>
+    #   closure is Kleene closure of graph
+    #   with bot elements self.bots ∪ {'bot'} and top elements self.tops ∪ {'top'}
+    self.graph = N.DiGraph()
+    self.closure = self.graph
+    self.up_to_date = True
+  def update(self):
+    if self.up_to_date: return
+    self.closure = N.DiGraph(self.graph)
+    self.closure.add_nodes_from(['bot', 'top'])
+    self.closure.add_edges_from(('bot', v) for v in self.closure.nodes)
+    self.closure.add_edges_from((v, 'top') for v in self.closure.nodes)
+    self.closure.add_edges_from((v, 'bot') for v in self.bots)
+    self.closure.add_edges_from(('top', v) for v in self.tops)
+    self.closure = N.transitive_closure(self.closure, reflexive=True)
+    self.up_to_date = True
   def add_bot(self, b):
-    self.bots |= {b}
-    self.graph |= {(b, z) for (x, y) in self.graph for z in (x, y)}
+    self.bots.add(b)
+    self.up_to_date = False
     return self
   def add_top(self, t):
-    self.tops |= {t}
-    self.graph |= {(z, t) for (x, y) in self.graph for z in (x, y)}
+    self.tops.add(t)
+    self.up_to_date = False
     return self
   def add(self, x, y):
-    if (x, y) in self.graph:
-      return
-    if y in self.bots:
-      return self.add_bot(x)
-    if x in self.tops:
-      return self.add_top(y)
-    self.graph |= {(b, x) for b in self.bots}
-    self.graph |= {(b, y) for b in self.bots}
-    self.graph |= {(x, t) for t in self.tops}
-    self.graph |= {(y, t) for t in self.tops}
-    self.graph |= {(x, y)}
-    while True:
-      done = True
-      for (x, y) in tuple(self.graph):
-        for (y0, z) in tuple(self.graph):
-          if y == y0 and (x, z) not in self.graph:
-            done = False
-            self.graph |= {(x, z)}
-      if done:
-        break
+    self.graph.add_edge(x, y)
+    self.up_to_date = False
     return self
   def le(self, x, y):
-    return (x in self.bots) or (y in self.tops) or (x == y) or ((x, y) in self.graph)
+    self.update()
+    return (x in self.bots) or (y in self.tops) or (x == y) or self.closure.has_edge(x, y)

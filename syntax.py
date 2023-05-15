@@ -130,7 +130,6 @@ def make_parser():
       count = 0
       dups = 0
       for tree in L.visitors.CollapseAmbiguities().transform(forest):
-        if count % 20000 == 0: print(f'dups {dups}, tree {count}:\n{tree.pretty()}')
         count += 1
         # Sometimes forest does not share perfectly in highly ambiguous grammars, and there are duplicate trees
         if tree in seen:
@@ -146,7 +145,6 @@ def make_parser():
         if lhs_matches_rhs:
           v = v.no_parens()
           parses.append(v)
-      print(f'considered {count} trees, {dups} dups')
       return parses
     @staticmethod
     def parse(s):
