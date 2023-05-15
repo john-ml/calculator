@@ -8,7 +8,8 @@ def parens(s): return f'({s})'
 from poset import Poset
 global_prec_order = Poset().add_bot('bot').add_top('top')
 def to_prec(p): return p.__name__ if type(p) is type else p
-def prec_ge(p, q): global_prec_order.add(to_prec(q), to_prec(p))
+def add_prec(p): global_prec_order.add(to_prec(p))
+def prec_ge(p, q): global_prec_order.add_le(to_prec(q), to_prec(p))
 def prec_ges(pqs):
   for p, q in pqs:
     prec_ge(p, q)
@@ -311,8 +312,11 @@ def mixfix(c):
   c.simple_names = simple_names
   c.fvs = fvs
   c.no_parens = no_parens
+  add_prec(c)
   for k in annotations:
-    setattr(c, k, f'{name}.{k}')
+    prec_name = f'{name}.{k}'
+    setattr(c, k, prec_name)
+    add_prec(prec_name)
   if not hasattr(c, 'bracket'):
     c.bracket = lambda mode, s: parens(s)
   global global_parser
