@@ -37,6 +37,7 @@ class Poset:
     self.closure = N.DiGraph(self.graph)
     if len(self.bots) > 0:
       bot = next(iter(self.bots))
+      # Need list and not generator here as argument; self.closure.nodes is mutated during each loop iteration
       self.closure.add_edges_from([(bot, v) for v in self.closure.nodes])
       self.closure.add_edges_from((v, bot) for v in self.bots)
     if len(self.tops) > 0:
