@@ -76,3 +76,47 @@ print(term_parser.parse(term))
 term_parser = Lark(open('lc.lark').read(), start='term', ambiguity='explicit')
 ts = term_parser.parse(r'(\x.x x) (\x. x x)')
 print(ts.pretty())
+
+# ---------- Trying out a factored grammar ----------
+
+term_parser = Lark(r'''
+  ?term : sum
+  ?sum : product "+" term
+        | product
+  ?product : atom "*" product
+          | atom
+  ?atom : SIGNED_NUMBER -> number
+       | "(" term ")"
+
+  %import common.SIGNED_NUMBER
+  %import common.WS
+  %ignore WS
+''', start='term', parser='lalr')
+ts = term_parser.parse(r'1 * 2 + 3')
+print(ts.pretty())
+ts = term_parser.parse(r'1 + 2 + 3')
+print(ts.pretty())
+ts = term_parser.parse(r'(1 + 2) + 3')
+print(ts.pretty())
+
+# ---------- Factored grammar for LC? ----------
+
+term_parser = Lark(r'''
+  ?term : lam | app
+  ?app1 : atom
+  ?app : app app1 | app1
+  ?lam : "λ" name "." lam1
+  ?lam1 : lam | app
+  ?atom : name
+       | "(" term ")"
+  name : /[a-z]/
+
+  %import common.WS
+  %ignore WS
+''', start='term', parser='lalr')
+ts = term_parser.parse(r'λx.x')
+print(ts.pretty())
+ts = term_parser.parse(r'λx.λy.xy')
+print(ts.pretty())
+ts = term_parser.parse(r'λf.λg.λx.fx(gx)')
+print(ts.pretty())
