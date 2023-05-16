@@ -80,6 +80,13 @@ def make_parser():
       %import common.WS
       %ignore WS
     '''
+  def make_fancy_grammar(ps):
+    '''
+    bot_bot : p_q for each successor (p,q) of (bot,bot) in poset
+    p_q : p_r s t_q for each production with left and right precs (p,q) and intermediate precs r,t
+        | p'_q' for each successor (p',q') of (p,q) in poset
+    '''
+    pass
   def make_parser(ps):
     return L.Lark(make_grammar(ps), start='term', ambiguity='explicit')
   class Parens:
@@ -632,7 +639,7 @@ if __name__ == '__main__':
   @mixfix
   class App:
     m: any
-    app: Str('', pretty=' ')
+    app: Str(' ')
     n: any
   prec_ge(App.n, App.m) # left-associative
   prec_ge(App.n, Lam.m) # application binds stronger than λ
@@ -679,7 +686,7 @@ if __name__ == '__main__':
   expect(omega, global_parser.parse(r'\x. x x'))
   expect(omega, global_parser.parse(r'\x. (x x)'))
   expect(omega2, global_parser.parse(r'(\x. (x x)) ((\x. (x x)))'))
-  expect(App(App(id, id), id), global_parser.parse(r'(\x.x)(\x.x)(\x.x)'))
+  expect(App(App(id, id), id), global_parser.parse(r'(\x.x) (\x.x) (\x.x)'))
   # Even though the production for App is term -> term term, this still has a
   # unique parse because parsing of identifiers always takes the longest match
   expect(V(Name('xy')), global_parser.parse(r'xy'))
@@ -687,5 +694,22 @@ if __name__ == '__main__':
   # Recognizes the outer parens as superfluous and spaces unnecessary
   expect(
     Lam(F('f', lambda f: App(Lam(F('x', lambda x: x)), f))),
-    global_parser.parse(r'(\f.(\x.x)f)')
+    global_parser.parse(r'(\f.(\x.x) f)')
+  )
+
+  # Some longer parses (used to lead to exponential blowup; now fine because
+  # parsing of F is hard-coded to expect a name in binding position)
+  y = Lam(F('f', lambda f: App(
+    Lam(F('x', lambda x: App(f, App(x, x)))),
+    Lam(F('x', lambda x: App(f, App(x, x)))))
+  ))
+  snd_y = App(Lam(F('y', lambda y: Lam(F('p', lambda p: p)))), y)
+  is_zero = Lam(F('n', lambda n: App(
+    App(n, Lam(F('t', lambda t: Lam(F('f', lambda f: t))))),
+    Lam(F('n', lambda n: Lam(F('t', lambda t: Lam(F('f', lambda f: f)))))))
+  ))
+  expect(snd_y, global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x)))'))
+  expect(
+    App(snd_y, is_zero),
+    global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x))) (\n.n (\t.\f.t) (\n.\t.\f.f))')
   )
