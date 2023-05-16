@@ -205,9 +205,7 @@ def make_parser():
     def add_production(p):
       nonlocal up_to_date, productions, parser, transformer
       productions.append(p)
-      parser = make_parser(productions)
       constructors[classname_to_nt(p[0].__name__)] = p[0]
-      transformer = make_transformer(constructors)
       up_to_date = False
     @staticmethod
     def update_parser():
@@ -562,6 +560,8 @@ if __name__ == '__main__':
     q: any
   prec_ge(Plus, Plus.plus) # right associative
   prec_ges([(Times, Plus), (Times.q, Plus.p), (Times.q, Plus.q)]) # * takes precedence over +
+
+  # global_parser.update_parser()
 
   @mixfix
   class Pow:
