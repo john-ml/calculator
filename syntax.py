@@ -237,6 +237,7 @@ def make_parser():
     #   it down to the subgraph with edges
     #       {lr->lr' | lr' valid left-right-precs}
     #       \ {lr->lr'' | lr->lr'->lr'' in (D^2)+ with lr', lr'' both valid left-right-precs}
+    #   There is probably a more efficient way, but this is what's done for now.
     g = prec_order.generator_graph()
     partition = tuple(frozenset(scc) for scc in N.strongly_connected_components(g))
     canon = {x: eclass for eclass in partition for x in eclass}
