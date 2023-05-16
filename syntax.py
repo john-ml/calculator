@@ -174,16 +174,11 @@ def make_parser():
   #     m: any
   #     plus: Str('+')
   #     n: any
-  # as the tuple
+  # is represented as the tuple
   #   (C, [('m', any), ('plus', '+'), ('n', any)])
   def make_grammar(ps):
-    # TODO could construct the grammar more intelligently using the precedence
-    # poset to cut down the number of ambiguities. Essentially each cursor
-    # position can become a nonterminal that only references nonterminals
-    # corresponding to cursor positions that are higher up in the poset.
-    # Incomparable connected components of cursor positions should produce
-    # completely independent grammars, and annotations enforcing operator
-    # precedence and associativity should produce properly-factored ones.
+    # Naive version of make_fancy_grammar() that puts all productions into a
+    # single nonterminal 'term'. Not used but could come in handy for debugging.
     escape = lambda s: f'"{repr(s)[1:-1]}"'
     def make_prod_item(s):
       if s is F:
@@ -212,6 +207,15 @@ def make_parser():
       %ignore WS
     '''
   def make_fancy_grammar(prec_order, ps):
+    # Constructs the grammar more intelligently than make_grammar() by using the
+    # precedence poset to cut down the number of ambiguities. Essentially each
+    # (left-cursor-position, right-cursor-position) pair becomes a nonterminal
+    # that only references nonterminals corresponding to cursor positions that
+    # are higher up in the poset. Incomparable connected components of the
+    # precedence poset should produce completely independent grammars, and
+    # annotations enforcing operator precedence and associativity should produce
+    # properly-factored ones.
+    #
     # General idea: generate
     #   bot_bot : p_q for each successor (p,q) of (bot,bot) in poset
     #   p_q : p_r s t_q for each production with left and right precs (p,q) and intermediate precs r,t
