@@ -1,10 +1,6 @@
 import lark as L
 import networkx as N
 
-# ---------- Mixfix decorator ----------
-
-def parens(s): return f'({s})'
-
 # Global poset on cursor positions used by pretty-printer (see help(mixfix))
 from preorder import Preorder
 global_prec_order = Preorder().add_bot('bot').add_top('top')
@@ -16,6 +12,124 @@ def prec_ges(pqs):
     prec_ge(p, q)
 def prec_bot(p): global_prec_order.add_bot(to_prec(p))
 def prec_top(p): global_prec_order.add_top(to_prec(p))
+
+# ---------- Name binding ----------
+
+def nats():
+  n = 0
+  while True:
+    yield n
+    n += 1
+global_nats = nats()
+
+class Name:
+  '''
+  Names are represented as pairs (x:str, n:nat).
+  - x is the 'pretty name', usually specified by the user
+  - n is a disambiguator used to ensure that bound variables are never shadowed
+  '''
+  def __init__(self, x, n=None):
+    self.x = x
+    self.n = n
+  def __hash__(self): return hash((self.x, self.n))
+  def __eq__(self, other): return self.x == other.x and self.n == other.n
+  def __repr__(self): return f'Name({self.x}, {self.n})'
+  def __str__(self): return self.x if self.n is None else f'{self.x}@{self.n}'
+  def fresh(self): return Name(self.x, next(global_nats))
+  def with_n(self, n): return Name(self.x, n)
+
+class V:
+  '''
+  An occurrence of a variable name.
+  Usually not used to construct variables explicitly; see help(F).
+  '''
+  __match_args__ = ('x',)
+  def __init__(self, x): self.x = x
+  def __eq__(self, other, renaming={}): return renaming[self.x] == other.x if self.x in renaming else self.x == other.x
+  def __repr__(self): return f'V({repr(self.x)})'
+  def __str__(self): return self.str(None)
+  def fresh(self, renaming={}): return V(renaming[self.x]) if self.x in renaming else self
+  def subst(self, substitution): return substitution[self.x] if self.x in substitution else self
+  def simple_names(self, renaming={}, in_use=None): return V(renaming[self.x]) if self.x in renaming else self
+  def fvs(self): return {self.x}
+  def no_parens(self): return self
+  def str(self, mode, left_prec='bot', right_prec='bot', prec_order=global_prec_order): return str(self.x)
+
+class F:
+  '''
+  A binding form. There are two ways to construct instances of F:
+  - F('x', lambda x: e[x]) represents a term e with free variable x.
+    Constructs a value F(Name('x', n), e[V(Name('x', n))]) with n fresh.
+  - F(x:Name, e) represents a term e with free variable x.
+    Does not do any freshening.
+  Pattern matching against an instance of F produces [x:Name, e:term] with x fresh.
+  Thererfore, while F instances are constructed by F('x', lambda x: e) and F(x, e),
+  they are pattern-matched against as F([x, e]). This is to ensure that the
+  fresh name and its body are extracted together. To support pattern F(x, e) would
+  require two different getters for the name and the body. Depending on the order
+  in which the getters are called during pattern matching, this could cause e to
+  be scoped with respect to a stale version of x.
+  '''
+  __match_args__ = ('unwrap',)
+  def __init__(self, x, e=None):
+    fn = type(lambda x: x)
+    if type(x) is str and type(e) is type(lambda x: x):
+      self.x = Name(x).fresh()
+      self.e = e(V(self.x))
+    elif type(x) is Name:
+      self.x = x
+      self.e = e
+    else:
+      raise ValueError(f'F({repr(x)}, {repr(e)})')
+
+  def __repr__(self):
+    return f'F({repr(self.x)}, {repr(self.e)})'
+  
+  def __eq__(self, other, renaming={}):
+    return type(other) is F and self.e.__eq__(other.e, renaming | {self.x: other.x})
+
+  def __str__(self): return self.str(None)
+
+  def fresh(self, renaming={}):
+    x = self.x.fresh()
+    e = self.e.fresh(renaming | {self.x: x})
+    return F(x, e)
+
+  def subst(self, substitution):
+    x = self.x.fresh()
+    e = self.e.subst(substitution | {self.x: V(x)})
+    return F(x, e)
+
+  def simple_names(self, renaming={}, in_use=None):
+    if in_use is None: in_use = set(v for _, v in renaming.items())
+    banned = in_use | self.fvs()
+    x = (
+      self.x.with_n(None) if self.x.with_n(None) not in banned else
+      next(self.x.with_n(n) for n in nats() if self.x.with_n(n) not in banned)
+    )
+    e = self.e.simple_names(renaming | {self.x: x}, in_use | {x})
+    return F(x, e)
+
+  def fvs(self):
+    return self.e.fvs() - {self.x}
+
+  def no_parens(self): return F(self.x, self.e.no_parens())
+
+  def get_unwrap(self):
+    e = self.fresh()
+    res = [e.x, e.e]
+    return res
+  def set_unwrap(self): assert False
+  unwrap = property(get_unwrap, set_unwrap)
+
+  def str(self, mode, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
+    dot = '.' if mode is None else '. '
+    return f"{str(self.x)}{dot}{self.e.str(mode, left_prec='bot', right_prec=right_prec, prec_order=prec_order)}"
+
+
+# ---------- Mixfix decorator ----------
+
+def parens(s): return f'({s})'
 
 class Str:
   r'''
@@ -445,119 +559,6 @@ def mixfix(c):
   global global_parser
   global_parser.add_production((c, [(make_prec(k), v if type(v) is not Str else v.s) for k, v in annotations.items()]))
   return c
-
-# ---------- Name binding ----------
-
-def nats():
-  n = 0
-  while True:
-    yield n
-    n += 1
-global_nats = nats()
-
-class Name:
-  '''
-  Names are represented as pairs (x:str, n:nat).
-  - x is the 'pretty name', usually specified by the user
-  - n is a disambiguator used to ensure that bound variables are never shadowed
-  '''
-  def __init__(self, x, n=None):
-    self.x = x
-    self.n = n
-  def __hash__(self): return hash((self.x, self.n))
-  def __eq__(self, other): return self.x == other.x and self.n == other.n
-  def __repr__(self): return f'Name({self.x}, {self.n})'
-  def __str__(self): return self.x if self.n is None else f'{self.x}@{self.n}'
-  def fresh(self): return Name(self.x, next(global_nats))
-  def with_n(self, n): return Name(self.x, n)
-
-class V:
-  '''
-  An occurrence of a variable name.
-  Usually not used to construct variables explicitly; see help(F).
-  '''
-  __match_args__ = ('x',)
-  def __init__(self, x): self.x = x
-  def __eq__(self, other, renaming={}): return renaming[self.x] == other.x if self.x in renaming else self.x == other.x
-  def __repr__(self): return f'V({repr(self.x)})'
-  def __str__(self): return self.str(None)
-  def fresh(self, renaming={}): return V(renaming[self.x]) if self.x in renaming else self
-  def subst(self, substitution): return substitution[self.x] if self.x in substitution else self
-  def simple_names(self, renaming={}, in_use=None): return V(renaming[self.x]) if self.x in renaming else self
-  def fvs(self): return {self.x}
-  def no_parens(self): return self
-  def str(self, mode, left_prec='bot', right_prec='bot', prec_order=global_prec_order): return str(self.x)
-
-class F:
-  '''
-  A binding form. There are two ways to construct instances of F:
-  - F('x', lambda x: e[x]) represents a term e with free variable x.
-    Constructs a value F(Name('x', n), e[V(Name('x', n))]) with n fresh.
-  - F(x:Name, e) represents a term e with free variable x.
-    Does not do any freshening.
-  Pattern matching against an instance of F produces [x:Name, e:term] with x fresh.
-  Thererfore, while F instances are constructed by F('x', lambda x: e) and F(x, e),
-  they are pattern-matched against as F([x, e]). This is to ensure that the
-  fresh name and its body are extracted together. To support pattern F(x, e) would
-  require two different getters for the name and the body. Depending on the order
-  in which the getters are called during pattern matching, this could cause e to
-  be scoped with respect to a stale version of x.
-  '''
-  __match_args__ = ('unwrap',)
-  def __init__(self, x, e=None):
-    fn = type(lambda x: x)
-    if type(x) is str and type(e) is type(lambda x: x):
-      self.x = Name(x).fresh()
-      self.e = e(V(self.x))
-    elif type(x) is Name:
-      self.x = x
-      self.e = e
-    else:
-      raise ValueError(f'F({repr(x)}, {repr(e)})')
-
-  def __repr__(self):
-    return f'F({repr(self.x)}, {repr(self.e)})'
-  
-  def __eq__(self, other, renaming={}):
-    return type(other) is F and self.e.__eq__(other.e, renaming | {self.x: other.x})
-
-  def __str__(self): return self.str(None)
-
-  def fresh(self, renaming={}):
-    x = self.x.fresh()
-    e = self.e.fresh(renaming | {self.x: x})
-    return F(x, e)
-
-  def subst(self, substitution):
-    x = self.x.fresh()
-    e = self.e.subst(substitution | {self.x: V(x)})
-    return F(x, e)
-
-  def simple_names(self, renaming={}, in_use=None):
-    if in_use is None: in_use = set(v for _, v in renaming.items())
-    banned = in_use | self.fvs()
-    x = (
-      self.x.with_n(None) if self.x.with_n(None) not in banned else
-      next(self.x.with_n(n) for n in nats() if self.x.with_n(n) not in banned)
-    )
-    e = self.e.simple_names(renaming | {self.x: x}, in_use | {x})
-    return F(x, e)
-
-  def fvs(self):
-    return self.e.fvs() - {self.x}
-
-  def no_parens(self): return F(self.x, self.e.no_parens())
-
-  def get_unwrap(self):
-    e = self.fresh()
-    res = [e.x, e.e]
-    return res
-  def set_unwrap(self): assert False
-  unwrap = property(get_unwrap, set_unwrap)
-
-  def str(self, mode, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
-    dot = '.' if mode is None else '. '
-    return f"{str(self.x)}{dot}{self.e.str(mode, left_prec='bot', right_prec=right_prec, prec_order=prec_order)}"
 
 # ---------- Examples ----------
 
