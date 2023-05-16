@@ -106,12 +106,10 @@ def make_parser():
       def name(self, s): return Name(s[0].value)
       def var(self, s): return V(s[0])
       def parens(self, s): return Parens(s[0])
-      def binding(self, s):
-        return F(s[0], s[1])
+      def binding(self, s): return F(s[0], s[1])
     for name, c in constructors.items():
       def go(name, c): # wrapper to get proper lexical scoping
-        def transform(self, args):
-          return c.transform(args) if hasattr(c, 'transform') else c(*args)
+        def transform(self, args): return c(*args)
         setattr(T, name, transform)
       go(name, c)
     return T()
@@ -440,12 +438,6 @@ class F:
   def str(self, mode, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
     dot = '.' if mode is None else '. '
     return f"{str(self.x)}{dot}{self.e.str(mode, left_prec='bot', right_prec=right_prec, prec_order=prec_order)}"
-
-  @staticmethod
-  def transform(args):
-    match args:
-      case [V(x), e]: return F(x, e)
-      case _: raise ValueError(f'F.transform({repr(args)})')
 
 # ---------- Examples ----------
 
