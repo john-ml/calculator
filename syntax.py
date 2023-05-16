@@ -320,10 +320,7 @@ def make_parser():
       %ignore WS
     '''
   def make_parser(ps):
-    fancy_grammar = make_fancy_grammar(global_prec_order, ps)
-    grammar = make_grammar(ps)
-    print(grammar)
-    print(fancy_grammar)
+    grammar = make_fancy_grammar(global_prec_order, ps)
     return L.Lark(grammar, start='term', ambiguity='explicit')
   class Parens:
     '''
