@@ -222,33 +222,27 @@ def make_parser():
     # To achieve this:
     # - Let G be the graph that generates the precedence poset.
     # - Quotient G by SCCs to get a dag D.
-    # - The product D^2 orders pairs of precedences (l, r).
+    # - Confusing each element of G with its equivalence class, the product D^2
+    #   orders pairs of precedences (l, r).
     # - The key operation we need is, given a pair (l, r), to find immediate
     #   successors (l', r') where l' and r' are valid left- and right-
     #   precedences of a production in ps.
-    # - It'd be enough to have a subgraph of D^2 with
+    # - It'd be enough to have a graph with
     #     (l,r) -> (l',r') iff
     #       (l',r') are left- and right-precs for a production in ps
-    #       (l,r) reaches (l',r') in D^2
-    #       there is no (l,r) -> (l'',r'') -> (l',r') for some (l'',r'') also
-    #       valid left- and right-precs
-    # - One way to compute this:
-    #   - Take transitive closure (D^2)+.
-    #   - Cut down to edges
-    #       {lr->lr' | lr' valid lr-precs}
-    #       \ {lr->lr'' | lr->lr'->lr'' in (D^2)+ with lr', lr'' both valid lr-precs}
+    #       and (l,r) ->+ (l',r') in D^2
+    #       and there is no path (l,r) ->+ (l'',r'') ->+ (l',r')
+    #       for (l'',r'') also valid left- and right-precs
+    # - One way to compute this is to take the transitive closure (D^2)+ and cut
+    #   it down to the subgraph with edges
+    #       {lr->lr' | lr' valid left-right-precs}
+    #       \ {lr->lr'' | lr->lr'->lr'' in (D^2)+ with lr', lr'' both valid left-right-precs}
     g = prec_order.generator_graph()
     partition = tuple(frozenset(scc) for scc in N.strongly_connected_components(g))
     canon = {x: eclass for eclass in partition for x in eclass}
     d = N.quotient_graph(g, partition, create_using=N.DiGraph)
-    # Now that g has been quotiented by partition, we can associate to each pair
-    # (l, r) : eclass^2 to a unique Lark-friendly identifier
-    eclass_of_id = tuple(partition)
-    id_of_eclass = {eclass: i for i, eclass in enumerate(eclass_of_id)}
-    # str_of_lr = lambda l, r: f'term_{repr(set(l))}_{repr(set(r))}' # Useful for debugging
-    str_of_lr = lambda l, r: f'term_{id_of_eclass[l]}_{id_of_eclass[r]}'
     # To make ps easier to query, reorganize so that it maps pairs (l, r) to
-    # productions whose left- and right-post cursor positions match l and r.
+    # productions whose left- and right-most cursor positions match l and r.
     ps_at = {}
     for p in ps:
       l, [*_, (r, _)] = p
@@ -259,11 +253,11 @@ def make_parser():
     # Compute transitive closure of D^2
     d2 = N.strong_product(d, d) # strong_product = includes edges (v,w),(v,w') for w->w' in D
     d2plus = N.transitive_closure(d2)
+    # Compute graph giving nontrivial successors for any pair (l, r)
     def lr_ok(lr):
       l, r = lr
       if (l, r) in ps_at: return True # (l, r) is left- and right-prec of some grammar production
       else: return 'top' in l and 'top' in r
-    # Compute graph giving nontrivial successors for any pair (l, r)
     prec_graph = d2plus.edge_subgraph(
       {(v, w) for v, w in d2plus.edges if lr_ok(w)}
       - {(u, w) for u, v in d2plus.edges if lr_ok(v) for w in d2plus.successors(v) if lr_ok(w)}
@@ -274,6 +268,11 @@ def make_parser():
       succs = tuple(prec_graph.successors(lr))
       if lr not in ps_at and len(succs) == 1: inline_sing[lr] = succs[0]
       else: inline_sing[lr] = lr
+    # Associate each pair (l, r) : eclass^2 to a unique Lark-friendly identifier
+    eclass_of_id = tuple(partition)
+    id_of_eclass = {eclass: i for i, eclass in enumerate(eclass_of_id)}
+    # str_of_lr = lambda l, r: f'term_{repr(set(l))}_{repr(set(r))}' # Useful for debugging
+    str_of_lr = lambda l, r: f'term_{id_of_eclass[l]}_{id_of_eclass[r]}'
     productions = {} # maps strings of the form str_of_lr(l, r) to a list of productions
     # Populate productions by recursively traversing prec_graph
     def go(l, r):
