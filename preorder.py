@@ -35,14 +35,15 @@ class Preorder:
     '''Recompute the transitive closure.'''
     if self.good_closure: return
     self.closure = N.DiGraph(self.graph)
+    self.closure.add_nodes_from(self.bots)
+    self.closure.add_nodes_from(self.tops)
     if len(self.bots) > 0:
       bot = next(iter(self.bots))
-      # Need list and not generator here as argument; self.closure.nodes could be mutated during a loop iteration
-      self.closure.add_edges_from([(bot, v) for v in self.closure.nodes])
+      self.closure.add_edges_from((bot, v) for v in self.closure.nodes)
       self.closure.add_edges_from((v, bot) for v in self.bots)
     if len(self.tops) > 0:
       top = next(iter(self.tops))
-      self.closure.add_edges_from([(v, top) for v in self.closure.nodes])
+      self.closure.add_edges_from((v, top) for v in self.closure.nodes)
       self.closure.add_edges_from((top, v) for v in self.tops)
     self.closure = N.transitive_closure(self.closure, reflexive=True)
     self.good_closure = True
@@ -56,7 +57,7 @@ class Preorder:
     #      G is transitively closed, so x->y in G iff there is a nontrivial path from x to y in G.
     #   3. Skeleton is G - G^2 where G^2 has an edge x->z iff x->y->z for some y in G.
     #      This leaves only paths x->y in G that are not made from paths of length > 1.
-    partition = tuple(N.strongly_connected_components(self.closure))
+    partition = tuple(frozenset(scc) for scc in N.strongly_connected_components(self.closure))
     self.partition = {x: eclass for eclass in partition for x in eclass}
     g = N.quotient_graph(self.closure, partition, create_using=N.DiGraph)
     g2 = N.DiGraph((u, w) for (u, v) in g.edges for w in g.successors(v))
@@ -109,6 +110,9 @@ class Preorder:
     self.make_skeleton()
     return self.skeleton.successors(eclass)
   def elements(self): return self.graph.nodes
+  def eclasses(self):
+    self.make_skeleton()
+    return self.skeleton.nodes
 
 if __name__ == '__main__':
   g = N.DiGraph([(0, 1), (1, 0), (2, 2), (0, 3), (3, 4)])

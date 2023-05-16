@@ -80,14 +80,88 @@ def make_parser():
       %import common.WS
       %ignore WS
     '''
-  def make_fancy_grammar(ps):
+  def make_fancy_grammar(prec_order, ps):
+    # General idea: generate
+    #   bot_bot : p_q for each successor (p,q) of (bot,bot) in poset
+    #   p_q : p_r s t_q for each production with left and right precs (p,q) and intermediate precs r,t
+    #       | p'_q' for each successor (p',q') of (p,q) in poset
+    #   ...
+    #   top_top : atom | other top_top productions
+    #
+    # Associate to each pair (l, r) : eclass^2 to a unique Lark-friendly identifier
+    eclass_of_id = tuple(prec_order.eclasses())
+    id_of_eclass = {eclass: i for i, eclass in enumerate(eclass_of_id)}
+    # str_of_lr = lambda l, r: f'term_{id_of_eclass[l]}_{id_of_eclass[r]}'
+    str_of_lr = lambda l, r: f'term_{repr(set(l))}_{repr(set(r))}'
+    productions = {} # map strings of the form str_of_lr(l, r) to a list of productions
+    # To make ps easier to query, reorganize so that it maps pairs (l, r) to
+    # productions whose left- and right-post cursor positions match l and r
+    ps_at = {}
+    for p in ps:
+      l, [*_, (r, _)] = p
+      l = prec_order.canon(to_prec(l))
+      r = prec_order.canon(to_prec(r))
+      if (l, r) not in ps_at: ps_at[l, r] = []
+      ps_at[l, r].append(p)
+    # Populate productions by recursively traversing skeleton of precedence poset
+    def go(l, r):
+      nonlocal prec_order, productions, ps
+      lr = str_of_lr(l, r)
+      if lr in productions: return
+      productions[lr] = []
+      if 'top' in l and 'top' in r:
+        productions[lr].append('atom')
+      for c, p in ps_at.get((l, r), []):
+        pieces = []
+        for (new_l, _), (new_r, v) in zip([(to_prec(c), None)] + p, p):
+          if type(v) is str:
+            escape = lambda s: f'"{repr(s)[1:-1]}"'
+            if v != '': pieces.append(escape(v))
+          else:
+            new_l = prec_order.canon(new_l)
+            new_r = prec_order.canon(new_r)
+            pieces.append(str_of_lr(new_l, new_r))
+            go(new_l, new_r)
+        productions[lr].append(' '.join(pieces))
+      # print('succs of', l, 'is', list(prec_order.succs(l)))
+      # print(prec_order.tops)
+      for next_l in [l] + list(prec_order.succs(l)):
+        for next_r in [l] + list(prec_order.succs(r)):
+          if next_l == l and next_r == r: continue
+          productions[lr].append(str_of_lr(next_l, next_r))
+          go(next_l, next_r)
+    bot_canon = prec_order.canon('bot')
+    go(bot_canon, bot_canon)
+    str_productions = '\n\n'.join(
+      k + ' : ' + '\n| '.join(p)
+      for k, p in productions.items()
+    )
+    return f'''
+      ?term : {str_of_lr(bot_canon, bot_canon)}
+
+      {str_productions}
+
+      ?atom : name -> var
+      | ESCAPED_STRING -> string
+      | SIGNED_NUMBER -> number
+      | "(" term ")" -> parens
+
+      name : CNAME
+
+      %import common.CNAME
+      %import common.ESCAPED_STRING
+      %import common.SIGNED_NUMBER
+      %import common.WS
+      %ignore WS
     '''
-    bot_bot : p_q for each successor (p,q) of (bot,bot) in poset
-    p_q : p_r s t_q for each production with left and right precs (p,q) and intermediate precs r,t
-        | p'_q' for each successor (p',q') of (p,q) in poset
-    '''
-    pass
   def make_parser(ps):
+    fancy_grammar = make_fancy_grammar(global_prec_order, ps)
+    # print('-'*10)
+    # print(ps)
+    # # print(fancy_grammar)
+    # print(len(fancy_grammar))
+    # print(len(global_prec_order.closure.edges))
+    # print(len(global_prec_order.closure.nodes))
     return L.Lark(make_grammar(ps), start='term', ambiguity='explicit')
   class Parens:
     '''
@@ -122,23 +196,33 @@ def make_parser():
     return T()
   productions = []
   constructors = {} # mapping from names of classes to themselves
-  # invariant: the 2 equalities below always hold
+  up_to_date = True
+  # invariant: up_to_date ==> the 2 equalities below always hold
   parser = make_parser(productions)
   transformer = make_transformer(constructors)
   class Parser:
     @staticmethod
     def add_production(p):
-      nonlocal productions, parser, transformer
+      nonlocal up_to_date, productions, parser, transformer
       productions.append(p)
       parser = make_parser(productions)
       constructors[classname_to_nt(p[0].__name__)] = p[0]
       transformer = make_transformer(constructors)
+      up_to_date = False
+    @staticmethod
+    def update_parser():
+      nonlocal up_to_date, parser, transformer
+      if up_to_date: return
+      parser = make_parser(productions)
+      transformer = make_transformer(constructors)
+      up_to_date = True
     @staticmethod
     def parses(s):
       '''
       Returns the parses that stringify to s up to whitespace and extra parens.
       '''
-      nonlocal parser, transformer
+      nonlocal up_to_date, parser, transformer
+      Parser.update_parser()
       forest = parser.parse(s)
       parses = []
       seen = set()
