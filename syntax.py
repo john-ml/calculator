@@ -267,6 +267,13 @@ def make_parser():
           if type(v) is str:
             escape = lambda s: f'"{repr(s)[1:-1]}"'
             if v != '': pieces.append(escape(v))
+          elif v is F:
+            new_l = canon['bot']
+            new_r = canon[new_r]
+            pieces.append('name')
+            pieces.append('"."')
+            pieces.append(str_of_lr(new_l, new_r))
+            go(new_l, new_r)
           else:
             new_l = canon[new_l]
             new_r = canon[new_r]
@@ -678,155 +685,152 @@ if __name__ == '__main__':
   prec_ge(Eq.n, Exists.xp) # by transitivity, Eq.n >= Forall.xp
   prec_ge(Times.q, Exists.xp)
 
-  global_parser.update_parser()
+  p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
+  expect('∀ x@0. ∃ y@1. x@0 = y@1', p.str('pretty'))
+  expect('∀ x. ∃ y. x = y', p.simple_names().str('pretty'))
 
-#  p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
-#  expect('∀ x@0. ∃ y@1. x@0 = y@1', p.str('pretty'))
-#  expect('∀ x. ∃ y. x = y', p.simple_names().str('pretty'))
-#
-#  # Equality up to renaming
-#  mxy = Forall(F('x', lambda x: Forall(F('y', lambda y: Eq(x, y)))))
-#  muv = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(u, v)))))
-#  muv_flip = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(v, u)))))
-#  expect(True, mxy == muv)
-#  expect(False, mxy == muv_flip)
-#
-#  # Parsing of C identifiers as variable names
-#  expect(V(Name('a')), global_parser.parse('a'))
-#  expect(V(Name('snake_case123')), global_parser.parse('snake_case123'))
-#  expect(V(Name('_abc')), global_parser.parse('_abc'))
-#
-#  # Parsing of binding forms
-#  expect(F(Name('x'), V(Name('x'))), global_parser.parse('x. x'))
-#  expect(F(Name('x'), V(Name('y'))), global_parser.parse('x. y'))
-#  # The bad parse (x. x). x is discarded because the call to F.__init__ raises
-#  expect(F(Name('x'), F(Name('x'), V(Name('x')))), global_parser.parse('x. x. x')) 
-#
-#  # Parsing of quantified formulas
-#  # Note: tests are happening up to renaming of bound variables, because
-#  # F.__eq__ works up to renaming
-#  expect(Forall(F('x', lambda x: x)), global_parser.parse('forall x. x'))
-#  expect(Exists(F('x', lambda x: x)), global_parser.parse('exists x. x'))
-#  expect(Forall(F('p', lambda p: Times(p, p))), global_parser.parse('forall x. x * x'))
-#  expect(Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y))))), global_parser.parse('forall x. exists y. x = y'))
-#  expect(
-#    Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y)))))))), 
-#    global_parser.parse('forall x. forall y. exists z. (y = y) * (x = y)')
-#  )
-#  raises(lambda: global_parser.parse('forall x. forall y. exists z. (y = y) * x = y')) # missing parens around x = y
-#
-#  # Example 3: pattern matching on ABTs
-#
-#  def simplify(p):
-#    match p:
-#      case Eq(m, n): return Top() if m == n else Eq(simplify(m), simplify(n))
-#      case V(x): return V(x)
-#      case Forall(F([x, p])):
-#        p = simplify(p)
-#        if x not in p.fvs(): return p
-#        else: return Forall(F(x, p))
-#      case Exists(F([x, p])):
-#        p = simplify(p)
-#        if x not in p.fvs(): return p
-#        else: return Exists(F(x, p))
-#      case Plus(p, q): return Plus(simplify(p), simplify(q))
-#      case Times(p, q):
-#        match simplify(p), simplify(q):
-#          case Top(), Top(): return Top()
-#          case Top(), q: return q
-#          case p, Top(): return p
-#          case p, q: return Times(p, q)
-#      case Pow(p, q): return Pow(simplify(p), simplify(q))
-#      case _:
-#        assert False
-#
-#  p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Times(Eq(x, y), Eq(z, z)))))))))
-#  expect(set(), p.fvs())
-#  expect('∀ x. ∀ y. ∃ z. (y = y) * (x = y) * (z = z)', p.simple_names().str('pretty'))
-#  p = simplify(p)
-#  expect('∀ x. ∀ y. x = y', p.simple_names().str('pretty'))
-#
-#  # Example 4: untyped LC
-#
-#  @mixfix
-#  class Lam:
-#    lam: Str('\\', pretty='λ')
-#    m: F
-#  @mixfix
-#  class App:
-#    m: any
-#    app: Str(' ')
-#    n: any
-#  prec_ge(App.n, App.m) # left-associative
-#  prec_ge(App.n, Lam.m) # application binds stronger than λ
-#
-#  # str uses \ and condensed . while pretty uses λ
-#  id = Lam(F('x', lambda x: x))
-#  expect('λx. x', id.simple_names().str('pretty'))
-#  expect(r'\x.x', str(id.simple_names()))
-#
-#  # Check printing of function applications
-#  expect('(λx. x) ((λx. x) (λx. x))', App(id, App(id, id)).simple_names().str('pretty'))
-#  expect('(λx. x) (λx. x) (λx. x)', App(App(id, id), id).simple_names().str('pretty'))
-#
-#  # One-step reduction
-#  class Stuck(Exception): pass
-#  def step(m):
-#    match m:
-#      case Lam(F([x, m])): return Lam(F(x, step(m)))
-#      case App(Lam(F([x, m])), n): return m.subst({x: n})
-#      case App(m, n):
-#        try: return App(step(m), n)
-#        except Stuck: return App(m, step(n))
-#      case V(x): raise Stuck()
-#
-#  expect('λx. x', step(App(id, id)).simple_names().str('pretty'))
-#
-#  # Check capture-avoiding substitution on \y. (\x. \y. x) y
-#  k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
-#  v = lambda y: y
-#  m = Lam(F('y', lambda y: App(k(y), v(y))))
-#  expect('λy. (λx. λy@0. x) y', m.simple_names().str('pretty'))
-#  m = step(m)
-#  expect('λy. λy@0. y', m.simple_names().str('pretty'))
-#
-#  # Omega Omega -> Omega Omega
-#  omega = Lam(F('x', lambda x: App(x, x)))
-#  expect('λx. x x', omega.simple_names().str('pretty'))
-#  omega2 = App(omega, omega)
-#  expect('(λx. x x) (λx. x x)', omega2.simple_names().str('pretty'))
-#  omega2 = step(omega2)
-#  expect('(λx. x x) (λx. x x)', omega2.simple_names().str('pretty'))
-#
-#  # Parsing
-#  expect(omega, global_parser.parse(r'\x. x x'))
-#  expect(omega, global_parser.parse(r'\x. (x x)'))
-#  expect(omega2, global_parser.parse(r'(\x. (x x)) ((\x. (x x)))'))
-#  expect(App(App(id, id), id), global_parser.parse(r'(\x.x) (\x.x) (\x.x)'))
-#  # Even though the production for App is term -> term term, this still has a
-#  # unique parse because parsing of identifiers always takes the longest match
-#  expect(V(Name('xy')), global_parser.parse(r'xy'))
-#
-#  # Recognizes the outer parens as superfluous and spaces unnecessary
-#  expect(
-#    Lam(F('f', lambda f: App(Lam(F('x', lambda x: x)), f))),
-#    global_parser.parse(r'(\f.(\x.x) f)')
-#  )
-#
-#  # Some longer parses (used to lead to exponential blowup; now fine because
-#  # parsing of F is hard-coded to expect a name in binding position)
-#  y = Lam(F('f', lambda f: App(
-#    Lam(F('x', lambda x: App(f, App(x, x)))),
-#    Lam(F('x', lambda x: App(f, App(x, x)))))
-#  ))
-#  snd_y = App(Lam(F('y', lambda y: Lam(F('p', lambda p: p)))), y)
-#  is_zero = Lam(F('n', lambda n: App(
-#    App(n, Lam(F('t', lambda t: Lam(F('f', lambda f: t))))),
-#    Lam(F('n', lambda n: Lam(F('t', lambda t: Lam(F('f', lambda f: f)))))))
-#  ))
-#  expect(snd_y, global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x)))'))
-#  expect(
-#    App(snd_y, is_zero),
-#    global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x))) (\n.n (\t.\f.t) (\n.\t.\f.f))')
-#  )
-#
+  # Equality up to renaming
+  mxy = Forall(F('x', lambda x: Forall(F('y', lambda y: Eq(x, y)))))
+  muv = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(u, v)))))
+  muv_flip = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(v, u)))))
+  expect(True, mxy == muv)
+  expect(False, mxy == muv_flip)
+
+  # Parsing of C identifiers as variable names
+  expect(V(Name('a')), global_parser.parse('a'))
+  expect(V(Name('snake_case123')), global_parser.parse('snake_case123'))
+  expect(V(Name('_abc')), global_parser.parse('_abc'))
+
+  # Parsing of binding forms
+  expect(F(Name('x'), V(Name('x'))), global_parser.parse('x. x'))
+  expect(F(Name('x'), V(Name('y'))), global_parser.parse('x. y'))
+  # The bad parse (x. x). x is discarded because the call to F.__init__ raises
+  expect(F(Name('x'), F(Name('x'), V(Name('x')))), global_parser.parse('x. x. x')) 
+
+  # Parsing of quantified formulas
+  # Note: tests are happening up to renaming of bound variables, because
+  # F.__eq__ works up to renaming
+  expect(Forall(F('x', lambda x: x)), global_parser.parse('forall x. x'))
+  expect(Exists(F('x', lambda x: x)), global_parser.parse('exists x. x'))
+  expect(Forall(F('p', lambda p: Times(p, p))), global_parser.parse('forall x. x * x'))
+  expect(Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y))))), global_parser.parse('forall x. exists y. x = y'))
+  expect(
+    Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y)))))))), 
+    global_parser.parse('forall x. forall y. exists z. (y = y) * (x = y)')
+  )
+  raises(lambda: global_parser.parse('forall x. forall y. exists z. (y = y) * x = y')) # missing parens around x = y
+
+  # Example 3: pattern matching on ABTs
+
+  def simplify(p):
+    match p:
+      case Eq(m, n): return Top() if m == n else Eq(simplify(m), simplify(n))
+      case V(x): return V(x)
+      case Forall(F([x, p])):
+        p = simplify(p)
+        if x not in p.fvs(): return p
+        else: return Forall(F(x, p))
+      case Exists(F([x, p])):
+        p = simplify(p)
+        if x not in p.fvs(): return p
+        else: return Exists(F(x, p))
+      case Plus(p, q): return Plus(simplify(p), simplify(q))
+      case Times(p, q):
+        match simplify(p), simplify(q):
+          case Top(), Top(): return Top()
+          case Top(), q: return q
+          case p, Top(): return p
+          case p, q: return Times(p, q)
+      case Pow(p, q): return Pow(simplify(p), simplify(q))
+      case _:
+        assert False
+
+  p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Times(Eq(x, y), Eq(z, z)))))))))
+  expect(set(), p.fvs())
+  expect('∀ x. ∀ y. ∃ z. (y = y) * (x = y) * (z = z)', p.simple_names().str('pretty'))
+  p = simplify(p)
+  expect('∀ x. ∀ y. x = y', p.simple_names().str('pretty'))
+
+  # Example 4: untyped LC
+
+  @mixfix
+  class Lam:
+    lam: Str('\\', pretty='λ')
+    m: F
+  @mixfix
+  class App:
+    m: any
+    app: Str(' ')
+    n: any
+  prec_ge(App.n, App.m) # left-associative
+  prec_ge(App.n, Lam.m) # application binds stronger than λ
+
+  # str uses \ and condensed . while pretty uses λ
+  id = Lam(F('x', lambda x: x))
+  expect('λx. x', id.simple_names().str('pretty'))
+  expect(r'\x.x', str(id.simple_names()))
+
+  # Check printing of function applications
+  expect('(λx. x) ((λx. x) (λx. x))', App(id, App(id, id)).simple_names().str('pretty'))
+  expect('(λx. x) (λx. x) (λx. x)', App(App(id, id), id).simple_names().str('pretty'))
+
+  # One-step reduction
+  class Stuck(Exception): pass
+  def step(m):
+    match m:
+      case Lam(F([x, m])): return Lam(F(x, step(m)))
+      case App(Lam(F([x, m])), n): return m.subst({x: n})
+      case App(m, n):
+        try: return App(step(m), n)
+        except Stuck: return App(m, step(n))
+      case V(x): raise Stuck()
+
+  expect('λx. x', step(App(id, id)).simple_names().str('pretty'))
+
+  # Check capture-avoiding substitution on \y. (\x. \y. x) y
+  k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
+  v = lambda y: y
+  m = Lam(F('y', lambda y: App(k(y), v(y))))
+  expect('λy. (λx. λy@0. x) y', m.simple_names().str('pretty'))
+  m = step(m)
+  expect('λy. λy@0. y', m.simple_names().str('pretty'))
+
+  # Omega Omega -> Omega Omega
+  omega = Lam(F('x', lambda x: App(x, x)))
+  expect('λx. x x', omega.simple_names().str('pretty'))
+  omega2 = App(omega, omega)
+  expect('(λx. x x) (λx. x x)', omega2.simple_names().str('pretty'))
+  omega2 = step(omega2)
+  expect('(λx. x x) (λx. x x)', omega2.simple_names().str('pretty'))
+
+  # Parsing
+  expect(omega, global_parser.parse(r'\x. x x'))
+  expect(omega, global_parser.parse(r'\x. (x x)'))
+  expect(omega2, global_parser.parse(r'(\x. (x x)) ((\x. (x x)))'))
+  expect(App(App(id, id), id), global_parser.parse(r'(\x.x) (\x.x) (\x.x)'))
+  # Even though the production for App is term -> term term, this still has a
+  # unique parse because parsing of identifiers always takes the longest match
+  expect(V(Name('xy')), global_parser.parse(r'xy'))
+
+  # Recognizes the outer parens as superfluous and spaces unnecessary
+  expect(
+    Lam(F('f', lambda f: App(Lam(F('x', lambda x: x)), f))),
+    global_parser.parse(r'(\f.(\x.x) f)')
+  )
+
+  # Some longer parses (used to lead to exponential blowup; now fine because
+  # parsing of F is hard-coded to expect a name in binding position)
+  y = Lam(F('f', lambda f: App(
+    Lam(F('x', lambda x: App(f, App(x, x)))),
+    Lam(F('x', lambda x: App(f, App(x, x)))))
+  ))
+  snd_y = App(Lam(F('y', lambda y: Lam(F('p', lambda p: p)))), y)
+  is_zero = Lam(F('n', lambda n: App(
+    App(n, Lam(F('t', lambda t: Lam(F('f', lambda f: t))))),
+    Lam(F('n', lambda n: Lam(F('t', lambda t: Lam(F('f', lambda f: f)))))))
+  ))
+  expect(snd_y, global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x)))'))
+  expect(
+    App(snd_y, is_zero),
+    global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x))) (\n.n (\t.\f.t) (\n.\t.\f.f))')
+  )
