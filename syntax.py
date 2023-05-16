@@ -175,8 +175,15 @@ def make_parser():
     # completely independent grammars, and annotations enforcing operator
     # precedence and associativity should produce properly-factored ones.
     escape = lambda s: f'"{repr(s)[1:-1]}"'
+    def make_prod_item(s):
+      if s is F:
+        return 'name "." term'
+      elif type(s) is str:
+        return '' if s == '' else escape(s)
+      else:
+        return 'term'
     lines = ''.join(
-      f'\n      | {" ".join("term" if type(s) is not str else "" if s == "" else escape(s) for _, s in p)} -> {classname_to_nt(c.__name__)}' for c, p in ps
+      f'\n      | {" ".join(make_prod_item(s) for _, s in p)} -> {classname_to_nt(c.__name__)}' for c, p in ps
     )
     return f'''
       ?term : atom{lines}
@@ -308,12 +315,6 @@ def make_parser():
     '''
   def make_parser(ps):
     fancy_grammar = make_fancy_grammar(global_prec_order, ps)
-    print('-'*10)
-    print(ps)
-    print(fancy_grammar)
-    print(len(fancy_grammar))
-    print(len(global_prec_order.closure.edges))
-    print(len(global_prec_order.closure.nodes))
     return L.Lark(make_grammar(ps), start='term', ambiguity='explicit')
   class Parens:
     '''
@@ -342,7 +343,18 @@ def make_parser():
       def binding(self, s): return F(s[0], s[1])
     for name, c in constructors.items():
       def go(name, c): # wrapper to get proper lexical scoping
-        def transform(self, args): return c(*args)
+        def transform(self, args):
+          new_args = []
+          fields = [v for _, v in c.__annotations__.items() if type(v) is not Str]
+          i = 0
+          for v in fields:
+            if v is F:
+              new_args.append(F(args[i], args[i+1]))
+              i += 2
+            else:
+              new_args.append(args[i])
+              i += 1
+          return c(*new_args)
         setattr(T, name, transform)
       go(name, c)
     return T()
