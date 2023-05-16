@@ -40,7 +40,7 @@ class Lam:
 @S.mixfix
 class App:
   m: any
-  app: S.Str('', tex='~')
+  app: S.Str(' ', tex='~')
   n: any
 S.prec_ge(App.n, App.m) # left-associative
 S.prec_ge(App.n, Lam.m) # application binds stronger than λ
