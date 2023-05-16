@@ -66,10 +66,13 @@ def make_parser():
     return f'''
       ?term : atom{lines}
       | "(" term ")" -> parens
+      | name "." term -> binding
   
-      ?atom : CNAME -> identifier
+      ?atom : name -> var
       | ESCAPED_STRING -> string
       | SIGNED_NUMBER -> number
+
+      name : CNAME
   
       %import common.CNAME
       %import common.ESCAPED_STRING
@@ -100,8 +103,11 @@ def make_parser():
       return '(' + self.x.str(mode, left_prec='bot', right_prec='bot', prec_order=prec_order) + ')'
   def make_transformer(constructors):
     class T(L.Transformer):
-      def identifier(self, s): return V(Name(s[0].value))
+      def name(self, s): return Name(s[0].value)
+      def var(self, s): return V(s[0])
       def parens(self, s): return Parens(s[0])
+      def binding(self, s):
+        return F(s[0], s[1])
     for name, c in constructors.items():
       def go(name, c): # wrapper to get proper lexical scoping
         def transform(self, args):
@@ -440,8 +446,6 @@ class F:
     match args:
       case [V(x), e]: return F(x, e)
       case _: raise ValueError(f'F.transform({repr(args)})')
-
-global_parser.add_production((F, [('F.x', None), ('F.dot', '.'), ('F.e', None)]))
 
 # ---------- Examples ----------
 
