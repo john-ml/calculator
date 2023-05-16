@@ -258,10 +258,17 @@ def make_parser():
       {(v, w) for v, w in d2plus.edges if lr_ok(w)}
       - {(u, w) for u, v in d2plus.edges if lr_ok(v) for w in d2plus.successors(v) if lr_ok(w)}
     )
+    # If (l,r) has exactly one successor (l',r') in prec_graph, replace (l,r) with (l',r') throughout
+    inline_sing = {}
+    for lr in prec_graph.nodes:
+      succs = tuple(prec_graph.successors(lr))
+      if lr not in ps_at and len(succs) == 1: inline_sing[lr] = succs[0]
+      else: inline_sing[lr] = lr
     productions = {} # maps strings of the form str_of_lr(l, r) to a list of productions
     # Populate productions by recursively traversing prec_graph
     def go(l, r):
       nonlocal prec_order, productions, ps
+      l, r = inline_sing[l, r]
       lr = str_of_lr(l, r)
       if lr in productions: return
       productions[lr] = []
@@ -278,17 +285,17 @@ def make_parser():
             new_r = canon[new_r]
             pieces.append('name')
             pieces.append('"."')
-            pieces.append(str_of_lr(new_l, new_r))
+            pieces.append(str_of_lr(*inline_sing[new_l, new_r]))
             go(new_l, new_r)
           else:
             new_l = canon[new_l]
             new_r = canon[new_r]
-            pieces.append(str_of_lr(new_l, new_r))
+            pieces.append(str_of_lr(*inline_sing[new_l, new_r]))
             go(new_l, new_r)
         productions[lr].append(f'{" ".join(pieces)} -> {classname_to_nt(c.__name__)}')
-      for next_l, next_r in prec_graph.successors((l, r)):
-        productions[lr].append(str_of_lr(next_l, next_r))
-        go(next_l, next_r)
+      for next_lr in prec_graph.successors((l, r)):
+        productions[lr].append(str_of_lr(*inline_sing[next_lr]))
+        go(*next_lr)
     bot_canon = canon['bot']
     go(bot_canon, bot_canon)
     str_productions = '\n\n'.join(
@@ -296,7 +303,7 @@ def make_parser():
       for k, p in productions.items()
     )
     return f'''
-      ?term : {str_of_lr(bot_canon, bot_canon)}
+      ?term : {str_of_lr(*inline_sing[bot_canon, bot_canon])}
       \n{str_productions}
 
       ?atom : name -> var
@@ -315,6 +322,8 @@ def make_parser():
   def make_parser(ps):
     fancy_grammar = make_fancy_grammar(global_prec_order, ps)
     grammar = make_grammar(ps)
+    print(grammar)
+    print(fancy_grammar)
     return L.Lark(grammar, start='term', ambiguity='explicit')
   class Parens:
     '''
