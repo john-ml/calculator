@@ -461,7 +461,7 @@ def mixfix(c):
       plus: Str(' + ')
       q: any
       bracket = lambda mode, s: f'\\left({s}\\right)' if mode == 'tex' else paren(s)
-  to get ordinary parentheses instead of the LaTeX ones in mode 'tex'. It's not
+  to get LaTeX parentheses instead of the ordinary ones in mode 'tex'. It's not
   possible to change the bracketer used by str(), as that would break the parser.
 
   Precedences are declared as a partial ordering on 'cursor positions', which
