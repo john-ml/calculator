@@ -223,6 +223,8 @@ def make_parser():
     #   ...
     #   top_top : atom | other top_top productions
     #
+    #   atom : name | "(" bot_bot ")" | ...
+    #
     # To achieve this:
     # - Let G be the graph that generates the precedence poset.
     # - Quotient G by SCCs to get a dag D.
