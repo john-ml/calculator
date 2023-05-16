@@ -515,7 +515,7 @@ def mixfix(c):
   - class properties x, y, z, ... for referring to cursor positions denoted by these fields
   - class property __match_args__ = ('x', 'z', ...) for pattern matching against instances of C
   - method __repr__() that prints an instance of C for debugging
-  - method str() that prints an instance of C. Can be given a specific mode
+  - method str(m:str|None) that prints an instance of C in mode m.
   - method __str__(), like str() but prints specifically in mode None
   - method __eq__() that tests equality up to renaming of bound variables
   - method fresh(renaming) that freshens all bound variables (instances of the class F) in each field
@@ -523,8 +523,6 @@ def mixfix(c):
   - method simple_names(renaming, in_use) that maximally simplifies disambiguators on bound variable names
   - method fvs() that produces the free variables of an instance of C
   - method no_parens() that removes Paren instances from subtrees
-  - each pretty-printing mode becomes a method of C for printing in that mode
-  TODO tidy and move these docs into docstrings for the functions defined below
   '''
   name = c.__name__
   annotations = c.__annotations__
