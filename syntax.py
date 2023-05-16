@@ -354,7 +354,6 @@ def make_parser():
       def name(self, s): return Name(s[0].value)
       def var(self, s): return V(s[0])
       def parens(self, s): return Parens(s[0])
-      def binding(self, s): return F(s[0], s[1])
     for name, c in constructors.items():
       def go(name, c): # wrapper to get proper lexical scoping
         def transform(self, args):
