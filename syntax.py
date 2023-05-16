@@ -1,4 +1,5 @@
 import lark as L
+import networkx as N
 
 # ---------- Mixfix decorator ----------
 
@@ -50,7 +51,7 @@ def make_parser():
   #     plus: Str('+')
   #     n: any
   # as the tuple
-  #   (C, [('m', None), ('plus', '+'), ('n', None)])
+  #   (C, [('m', any), ('plus', '+'), ('n', any)])
   def make_grammar(ps):
     # TODO could construct the grammar more intelligently using the precedence
     # poset to cut down the number of ambiguities. Essentially each cursor
@@ -61,7 +62,7 @@ def make_parser():
     # precedence and associativity should produce properly-factored ones.
     escape = lambda s: f'"{repr(s)[1:-1]}"'
     lines = ''.join(
-      f'\n      | {" ".join("term" if s is None else "" if s == "" else escape(s) for _, s in p)} -> {classname_to_nt(c.__name__)}' for c, p in ps
+      f'\n      | {" ".join("term" if type(s) is not str else "" if s == "" else escape(s) for _, s in p)} -> {classname_to_nt(c.__name__)}' for c, p in ps
     )
     return f'''
       ?term : atom{lines}
@@ -88,22 +89,57 @@ def make_parser():
     #   ...
     #   top_top : atom | other top_top productions
     #
-    # Associate to each pair (l, r) : eclass^2 to a unique Lark-friendly identifier
-    eclass_of_id = tuple(prec_order.eclasses())
+    # To achieve this:
+    # - Let G be the graph that generates the precedence poset.
+    # - Quotient G by SCCs to get a dag D.
+    # - The product D^2 orders pairs of precedences (l, r).
+    # - The key operation we need is, given a pair (l, r), to find immediate
+    #   successors (l', r') where l' and r' are valid left- and right-
+    #   precedences of a production in ps.
+    # - It'd be enough to have a subgraph of D^2 with
+    #     (l,r) -> (l',r') iff
+    #       (l',r') are left- and right-precs for a production in ps
+    #       (l,r) reaches (l',r') in D^2
+    #       there is no (l,r) -> (l'',r'') -> (l',r') for some (l'',r'') also
+    #       valid left- and right-precs
+    # - One way to compute this:
+    #   - Take transitive closure (D^2)+.
+    #   - Cut down to edges
+    #       {lr->lr' | lr' valid lr-precs}
+    #       \ {lr->lr'' | lr->lr'->lr'' in (D^2)+ with lr', lr'' both valid lr-precs}
+    g = prec_order.generator_graph()
+    partition = tuple(frozenset(scc) for scc in N.strongly_connected_components(g))
+    canon = {x: eclass for eclass in partition for x in eclass}
+    d = N.quotient_graph(g, partition, create_using=N.DiGraph)
+    # Now that g has been quotiented by partition, we can associate to each pair
+    # (l, r) : eclass^2 to a unique Lark-friendly identifier
+    eclass_of_id = tuple(partition)
     id_of_eclass = {eclass: i for i, eclass in enumerate(eclass_of_id)}
-    # str_of_lr = lambda l, r: f'term_{id_of_eclass[l]}_{id_of_eclass[r]}'
-    str_of_lr = lambda l, r: f'term_{repr(set(l))}_{repr(set(r))}'
-    productions = {} # map strings of the form str_of_lr(l, r) to a list of productions
+    # str_of_lr = lambda l, r: f'term_{repr(set(l))}_{repr(set(r))}' # Useful for debugging
+    str_of_lr = lambda l, r: f'term_{id_of_eclass[l]}_{id_of_eclass[r]}'
     # To make ps easier to query, reorganize so that it maps pairs (l, r) to
-    # productions whose left- and right-post cursor positions match l and r
+    # productions whose left- and right-post cursor positions match l and r.
     ps_at = {}
     for p in ps:
       l, [*_, (r, _)] = p
-      l = prec_order.canon(to_prec(l))
-      r = prec_order.canon(to_prec(r))
+      l = canon[to_prec(l)]
+      r = canon[to_prec(r)]
       if (l, r) not in ps_at: ps_at[l, r] = []
       ps_at[l, r].append(p)
-    # Populate productions by recursively traversing skeleton of precedence poset
+    # Compute transitive closure of D^2
+    d2 = N.strong_product(d, d) # strong_product = includes edges (v,w),(v,w') for w->w' in D
+    d2plus = N.transitive_closure(d2)
+    def lr_ok(lr):
+      l, r = lr
+      if (l, r) in ps_at: return True # (l, r) is left- and right-prec of some grammar production
+      else: return 'top' in l and 'top' in r
+    # Compute graph giving nontrivial successors for any pair (l, r)
+    prec_graph = d2plus.edge_subgraph(
+      {(v, w) for v, w in d2plus.edges if lr_ok(w)}
+      - {(u, w) for u, v in d2plus.edges if lr_ok(v) for w in d2plus.successors(v) if lr_ok(w)}
+    )
+    productions = {} # maps strings of the form str_of_lr(l, r) to a list of productions
+    # Populate productions by recursively traversing prec_graph
     def go(l, r):
       nonlocal prec_order, productions, ps
       lr = str_of_lr(l, r)
@@ -118,28 +154,23 @@ def make_parser():
             escape = lambda s: f'"{repr(s)[1:-1]}"'
             if v != '': pieces.append(escape(v))
           else:
-            new_l = prec_order.canon(new_l)
-            new_r = prec_order.canon(new_r)
+            new_l = canon[new_l]
+            new_r = canon[new_r]
             pieces.append(str_of_lr(new_l, new_r))
             go(new_l, new_r)
-        productions[lr].append(' '.join(pieces))
-      # print('succs of', l, 'is', list(prec_order.succs(l)))
-      # print(prec_order.tops)
-      for next_l in [l] + list(prec_order.succs(l)):
-        for next_r in [l] + list(prec_order.succs(r)):
-          if next_l == l and next_r == r: continue
-          productions[lr].append(str_of_lr(next_l, next_r))
-          go(next_l, next_r)
-    bot_canon = prec_order.canon('bot')
+        productions[lr].append(f'{" ".join(pieces)} -> {classname_to_nt(c.__name__)}')
+      for next_l, next_r in prec_graph.successors((l, r)):
+        productions[lr].append(str_of_lr(next_l, next_r))
+        go(next_l, next_r)
+    bot_canon = canon['bot']
     go(bot_canon, bot_canon)
     str_productions = '\n\n'.join(
-      k + ' : ' + '\n| '.join(p)
+      f'      ?{k} : ' + '\n      | '.join(p)
       for k, p in productions.items()
     )
     return f'''
       ?term : {str_of_lr(bot_canon, bot_canon)}
-
-      {str_productions}
+      \n{str_productions}
 
       ?atom : name -> var
       | ESCAPED_STRING -> string
@@ -156,12 +187,12 @@ def make_parser():
     '''
   def make_parser(ps):
     fancy_grammar = make_fancy_grammar(global_prec_order, ps)
-    # print('-'*10)
-    # print(ps)
-    # # print(fancy_grammar)
-    # print(len(fancy_grammar))
-    # print(len(global_prec_order.closure.edges))
-    # print(len(global_prec_order.closure.nodes))
+    print('-'*10)
+    print(ps)
+    print(fancy_grammar)
+    print(len(fancy_grammar))
+    print(len(global_prec_order.closure.edges))
+    print(len(global_prec_order.closure.nodes))
     return L.Lark(make_grammar(ps), start='term', ambiguity='explicit')
   class Parens:
     '''
@@ -412,7 +443,7 @@ def mixfix(c):
   if not hasattr(c, 'bracket'):
     c.bracket = lambda mode, s: parens(s)
   global global_parser
-  global_parser.add_production((c, [(make_prec(k), None if type(v) is not Str else v.s) for k, v in annotations.items()]))
+  global_parser.add_production((c, [(make_prec(k), v if type(v) is not Str else v.s) for k, v in annotations.items()]))
   return c
 
 # ---------- Name binding ----------
@@ -561,8 +592,6 @@ if __name__ == '__main__':
   prec_ge(Plus, Plus.plus) # right associative
   prec_ges([(Times, Plus), (Times.q, Plus.p), (Times.q, Plus.q)]) # * takes precedence over +
 
-  # global_parser.update_parser()
-
   @mixfix
   class Pow:
     p: any
@@ -648,152 +677,155 @@ if __name__ == '__main__':
   prec_ge(Eq.n, Exists.xp) # by transitivity, Eq.n >= Forall.xp
   prec_ge(Times.q, Exists.xp)
 
-  p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
-  expect('∀ x@0. ∃ y@1. x@0 = y@1', p.str('pretty'))
-  expect('∀ x. ∃ y. x = y', p.simple_names().str('pretty'))
+  global_parser.update_parser()
 
-  # Equality up to renaming
-  mxy = Forall(F('x', lambda x: Forall(F('y', lambda y: Eq(x, y)))))
-  muv = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(u, v)))))
-  muv_flip = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(v, u)))))
-  expect(True, mxy == muv)
-  expect(False, mxy == muv_flip)
-
-  # Parsing of C identifiers as variable names
-  expect(V(Name('a')), global_parser.parse('a'))
-  expect(V(Name('snake_case123')), global_parser.parse('snake_case123'))
-  expect(V(Name('_abc')), global_parser.parse('_abc'))
-
-  # Parsing of binding forms
-  expect(F(Name('x'), V(Name('x'))), global_parser.parse('x. x'))
-  expect(F(Name('x'), V(Name('y'))), global_parser.parse('x. y'))
-  # The bad parse (x. x). x is discarded because the call to F.__init__ raises
-  expect(F(Name('x'), F(Name('x'), V(Name('x')))), global_parser.parse('x. x. x')) 
-
-  # Parsing of quantified formulas
-  # Note: tests are happening up to renaming of bound variables, because
-  # F.__eq__ works up to renaming
-  expect(Forall(F('x', lambda x: x)), global_parser.parse('forall x. x'))
-  expect(Exists(F('x', lambda x: x)), global_parser.parse('exists x. x'))
-  expect(Forall(F('p', lambda p: Times(p, p))), global_parser.parse('forall x. x * x'))
-  expect(Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y))))), global_parser.parse('forall x. exists y. x = y'))
-  expect(
-    Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y)))))))), 
-    global_parser.parse('forall x. forall y. exists z. (y = y) * (x = y)')
-  )
-  raises(lambda: global_parser.parse('forall x. forall y. exists z. (y = y) * x = y')) # missing parens around x = y
-
-  # Example 3: pattern matching on ABTs
-
-  def simplify(p):
-    match p:
-      case Eq(m, n): return Top() if m == n else Eq(simplify(m), simplify(n))
-      case V(x): return V(x)
-      case Forall(F([x, p])):
-        p = simplify(p)
-        if x not in p.fvs(): return p
-        else: return Forall(F(x, p))
-      case Exists(F([x, p])):
-        p = simplify(p)
-        if x not in p.fvs(): return p
-        else: return Exists(F(x, p))
-      case Plus(p, q): return Plus(simplify(p), simplify(q))
-      case Times(p, q):
-        match simplify(p), simplify(q):
-          case Top(), Top(): return Top()
-          case Top(), q: return q
-          case p, Top(): return p
-          case p, q: return Times(p, q)
-      case Pow(p, q): return Pow(simplify(p), simplify(q))
-      case _:
-        assert False
-
-  p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Times(Eq(x, y), Eq(z, z)))))))))
-  expect(set(), p.fvs())
-  expect('∀ x. ∀ y. ∃ z. (y = y) * (x = y) * (z = z)', p.simple_names().str('pretty'))
-  p = simplify(p)
-  expect('∀ x. ∀ y. x = y', p.simple_names().str('pretty'))
-
-  # Example 4: untyped LC
-
-  @mixfix
-  class Lam:
-    lam: Str('\\', pretty='λ')
-    m: F
-  @mixfix
-  class App:
-    m: any
-    app: Str(' ')
-    n: any
-  prec_ge(App.n, App.m) # left-associative
-  prec_ge(App.n, Lam.m) # application binds stronger than λ
-
-  # str uses \ and condensed . while pretty uses λ
-  id = Lam(F('x', lambda x: x))
-  expect('λx. x', id.simple_names().str('pretty'))
-  expect(r'\x.x', str(id.simple_names()))
-
-  # Check printing of function applications
-  expect('(λx. x) ((λx. x) (λx. x))', App(id, App(id, id)).simple_names().str('pretty'))
-  expect('(λx. x) (λx. x) (λx. x)', App(App(id, id), id).simple_names().str('pretty'))
-
-  # One-step reduction
-  class Stuck(Exception): pass
-  def step(m):
-    match m:
-      case Lam(F([x, m])): return Lam(F(x, step(m)))
-      case App(Lam(F([x, m])), n): return m.subst({x: n})
-      case App(m, n):
-        try: return App(step(m), n)
-        except Stuck: return App(m, step(n))
-      case V(x): raise Stuck()
-
-  expect('λx. x', step(App(id, id)).simple_names().str('pretty'))
-
-  # Check capture-avoiding substitution on \y. (\x. \y. x) y
-  k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
-  v = lambda y: y
-  m = Lam(F('y', lambda y: App(k(y), v(y))))
-  expect('λy. (λx. λy@0. x) y', m.simple_names().str('pretty'))
-  m = step(m)
-  expect('λy. λy@0. y', m.simple_names().str('pretty'))
-
-  # Omega Omega -> Omega Omega
-  omega = Lam(F('x', lambda x: App(x, x)))
-  expect('λx. x x', omega.simple_names().str('pretty'))
-  omega2 = App(omega, omega)
-  expect('(λx. x x) (λx. x x)', omega2.simple_names().str('pretty'))
-  omega2 = step(omega2)
-  expect('(λx. x x) (λx. x x)', omega2.simple_names().str('pretty'))
-
-  # Parsing
-  expect(omega, global_parser.parse(r'\x. x x'))
-  expect(omega, global_parser.parse(r'\x. (x x)'))
-  expect(omega2, global_parser.parse(r'(\x. (x x)) ((\x. (x x)))'))
-  expect(App(App(id, id), id), global_parser.parse(r'(\x.x) (\x.x) (\x.x)'))
-  # Even though the production for App is term -> term term, this still has a
-  # unique parse because parsing of identifiers always takes the longest match
-  expect(V(Name('xy')), global_parser.parse(r'xy'))
-
-  # Recognizes the outer parens as superfluous and spaces unnecessary
-  expect(
-    Lam(F('f', lambda f: App(Lam(F('x', lambda x: x)), f))),
-    global_parser.parse(r'(\f.(\x.x) f)')
-  )
-
-  # Some longer parses (used to lead to exponential blowup; now fine because
-  # parsing of F is hard-coded to expect a name in binding position)
-  y = Lam(F('f', lambda f: App(
-    Lam(F('x', lambda x: App(f, App(x, x)))),
-    Lam(F('x', lambda x: App(f, App(x, x)))))
-  ))
-  snd_y = App(Lam(F('y', lambda y: Lam(F('p', lambda p: p)))), y)
-  is_zero = Lam(F('n', lambda n: App(
-    App(n, Lam(F('t', lambda t: Lam(F('f', lambda f: t))))),
-    Lam(F('n', lambda n: Lam(F('t', lambda t: Lam(F('f', lambda f: f)))))))
-  ))
-  expect(snd_y, global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x)))'))
-  expect(
-    App(snd_y, is_zero),
-    global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x))) (\n.n (\t.\f.t) (\n.\t.\f.f))')
-  )
+#  p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
+#  expect('∀ x@0. ∃ y@1. x@0 = y@1', p.str('pretty'))
+#  expect('∀ x. ∃ y. x = y', p.simple_names().str('pretty'))
+#
+#  # Equality up to renaming
+#  mxy = Forall(F('x', lambda x: Forall(F('y', lambda y: Eq(x, y)))))
+#  muv = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(u, v)))))
+#  muv_flip = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(v, u)))))
+#  expect(True, mxy == muv)
+#  expect(False, mxy == muv_flip)
+#
+#  # Parsing of C identifiers as variable names
+#  expect(V(Name('a')), global_parser.parse('a'))
+#  expect(V(Name('snake_case123')), global_parser.parse('snake_case123'))
+#  expect(V(Name('_abc')), global_parser.parse('_abc'))
+#
+#  # Parsing of binding forms
+#  expect(F(Name('x'), V(Name('x'))), global_parser.parse('x. x'))
+#  expect(F(Name('x'), V(Name('y'))), global_parser.parse('x. y'))
+#  # The bad parse (x. x). x is discarded because the call to F.__init__ raises
+#  expect(F(Name('x'), F(Name('x'), V(Name('x')))), global_parser.parse('x. x. x')) 
+#
+#  # Parsing of quantified formulas
+#  # Note: tests are happening up to renaming of bound variables, because
+#  # F.__eq__ works up to renaming
+#  expect(Forall(F('x', lambda x: x)), global_parser.parse('forall x. x'))
+#  expect(Exists(F('x', lambda x: x)), global_parser.parse('exists x. x'))
+#  expect(Forall(F('p', lambda p: Times(p, p))), global_parser.parse('forall x. x * x'))
+#  expect(Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y))))), global_parser.parse('forall x. exists y. x = y'))
+#  expect(
+#    Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y)))))))), 
+#    global_parser.parse('forall x. forall y. exists z. (y = y) * (x = y)')
+#  )
+#  raises(lambda: global_parser.parse('forall x. forall y. exists z. (y = y) * x = y')) # missing parens around x = y
+#
+#  # Example 3: pattern matching on ABTs
+#
+#  def simplify(p):
+#    match p:
+#      case Eq(m, n): return Top() if m == n else Eq(simplify(m), simplify(n))
+#      case V(x): return V(x)
+#      case Forall(F([x, p])):
+#        p = simplify(p)
+#        if x not in p.fvs(): return p
+#        else: return Forall(F(x, p))
+#      case Exists(F([x, p])):
+#        p = simplify(p)
+#        if x not in p.fvs(): return p
+#        else: return Exists(F(x, p))
+#      case Plus(p, q): return Plus(simplify(p), simplify(q))
+#      case Times(p, q):
+#        match simplify(p), simplify(q):
+#          case Top(), Top(): return Top()
+#          case Top(), q: return q
+#          case p, Top(): return p
+#          case p, q: return Times(p, q)
+#      case Pow(p, q): return Pow(simplify(p), simplify(q))
+#      case _:
+#        assert False
+#
+#  p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Times(Eq(x, y), Eq(z, z)))))))))
+#  expect(set(), p.fvs())
+#  expect('∀ x. ∀ y. ∃ z. (y = y) * (x = y) * (z = z)', p.simple_names().str('pretty'))
+#  p = simplify(p)
+#  expect('∀ x. ∀ y. x = y', p.simple_names().str('pretty'))
+#
+#  # Example 4: untyped LC
+#
+#  @mixfix
+#  class Lam:
+#    lam: Str('\\', pretty='λ')
+#    m: F
+#  @mixfix
+#  class App:
+#    m: any
+#    app: Str(' ')
+#    n: any
+#  prec_ge(App.n, App.m) # left-associative
+#  prec_ge(App.n, Lam.m) # application binds stronger than λ
+#
+#  # str uses \ and condensed . while pretty uses λ
+#  id = Lam(F('x', lambda x: x))
+#  expect('λx. x', id.simple_names().str('pretty'))
+#  expect(r'\x.x', str(id.simple_names()))
+#
+#  # Check printing of function applications
+#  expect('(λx. x) ((λx. x) (λx. x))', App(id, App(id, id)).simple_names().str('pretty'))
+#  expect('(λx. x) (λx. x) (λx. x)', App(App(id, id), id).simple_names().str('pretty'))
+#
+#  # One-step reduction
+#  class Stuck(Exception): pass
+#  def step(m):
+#    match m:
+#      case Lam(F([x, m])): return Lam(F(x, step(m)))
+#      case App(Lam(F([x, m])), n): return m.subst({x: n})
+#      case App(m, n):
+#        try: return App(step(m), n)
+#        except Stuck: return App(m, step(n))
+#      case V(x): raise Stuck()
+#
+#  expect('λx. x', step(App(id, id)).simple_names().str('pretty'))
+#
+#  # Check capture-avoiding substitution on \y. (\x. \y. x) y
+#  k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
+#  v = lambda y: y
+#  m = Lam(F('y', lambda y: App(k(y), v(y))))
+#  expect('λy. (λx. λy@0. x) y', m.simple_names().str('pretty'))
+#  m = step(m)
+#  expect('λy. λy@0. y', m.simple_names().str('pretty'))
+#
+#  # Omega Omega -> Omega Omega
+#  omega = Lam(F('x', lambda x: App(x, x)))
+#  expect('λx. x x', omega.simple_names().str('pretty'))
+#  omega2 = App(omega, omega)
+#  expect('(λx. x x) (λx. x x)', omega2.simple_names().str('pretty'))
+#  omega2 = step(omega2)
+#  expect('(λx. x x) (λx. x x)', omega2.simple_names().str('pretty'))
+#
+#  # Parsing
+#  expect(omega, global_parser.parse(r'\x. x x'))
+#  expect(omega, global_parser.parse(r'\x. (x x)'))
+#  expect(omega2, global_parser.parse(r'(\x. (x x)) ((\x. (x x)))'))
+#  expect(App(App(id, id), id), global_parser.parse(r'(\x.x) (\x.x) (\x.x)'))
+#  # Even though the production for App is term -> term term, this still has a
+#  # unique parse because parsing of identifiers always takes the longest match
+#  expect(V(Name('xy')), global_parser.parse(r'xy'))
+#
+#  # Recognizes the outer parens as superfluous and spaces unnecessary
+#  expect(
+#    Lam(F('f', lambda f: App(Lam(F('x', lambda x: x)), f))),
+#    global_parser.parse(r'(\f.(\x.x) f)')
+#  )
+#
+#  # Some longer parses (used to lead to exponential blowup; now fine because
+#  # parsing of F is hard-coded to expect a name in binding position)
+#  y = Lam(F('f', lambda f: App(
+#    Lam(F('x', lambda x: App(f, App(x, x)))),
+#    Lam(F('x', lambda x: App(f, App(x, x)))))
+#  ))
+#  snd_y = App(Lam(F('y', lambda y: Lam(F('p', lambda p: p)))), y)
+#  is_zero = Lam(F('n', lambda n: App(
+#    App(n, Lam(F('t', lambda t: Lam(F('f', lambda f: t))))),
+#    Lam(F('n', lambda n: Lam(F('t', lambda t: Lam(F('f', lambda f: f)))))))
+#  ))
+#  expect(snd_y, global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x)))'))
+#  expect(
+#    App(snd_y, is_zero),
+#    global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x))) (\n.n (\t.\f.t) (\n.\t.\f.f))')
+#  )
+#

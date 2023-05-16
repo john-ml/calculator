@@ -185,33 +185,81 @@ print(ts.pretty())
 # ---------- Auto-factored grammar for arith ----------
 
 term_parser = Lark(r'''
-  ?term : bot_bot
-  bot_bot : plus_plusq
-  plus_plusq : plus_plusp "+" plusplus_plusq
-  | times_timesq
-  plus_plusp : times_timesq
-  times_timesq : times_timesp "*" timestimes_timesq
-  | top_top
-  times_timesp : top_top
-  top_top : atom
-  | "1"
-  timestimes_timesq : times_timesq
-  plusplus_plusq : plus_plusq
-  ?atom : name -> var
-  | ESCAPED_STRING -> string
-  | SIGNED_NUMBER -> number
-  | "(" term ")" -> parens
+      ?term : term_22_22
+      
+      ?term_22_22 : term_5_8
+      | term_9_12
+      | term_13_16
+      | term_17_16
+      | term_19_15
 
-  name : CNAME
-  %import common.CNAME
-  %import common.ESCAPED_STRING
-  %import common.SIGNED_NUMBER
-  %import common.WS
-  %ignore WS
-''', start='term', parser='lalr')
+      ?term_5_8 : term_5_6 "+" term_7_8 -> c_plus
+      | term_1_4
+
+      ?term_5_6 : term_1_4
+
+      ?term_1_4 : term_1_2 "*" term_3_4 -> c_times
+      | term_0_0
+
+      ?term_1_2 : term_0_0
+
+      ?term_0_0 : atom
+      | "1" -> c_top
+
+      ?term_3_4 : term_1_4
+
+      ?term_7_8 : term_5_8
+
+      ?term_9_12 : term_9_10 "->" term_11_12 -> c_pow
+      | term_0_0
+
+      ?term_9_10 : term_5_8
+
+      ?term_11_12 : term_9_12
+
+      ?term_13_16 : "forall " term_14_16 -> c_forall
+      | term_0_0
+
+      ?term_14_16 : term_0_0
+
+      ?term_17_16 : "exists " term_18_16 -> c_exists
+      | term_0_0
+
+      ?term_18_16 : term_0_0
+
+      ?term_19_15 : term_19_20 "=" term_21_15 -> c_eq
+      | term_0_0
+
+      ?term_19_20 : term_0_0
+
+      ?term_21_15 : term_0_0
+
+      ?atom : name -> var
+      | ESCAPED_STRING -> string
+      | SIGNED_NUMBER -> number
+      | "(" term ")" -> parens
+
+      name : CNAME
+
+      %import common.CNAME
+      %import common.ESCAPED_STRING
+      %import common.SIGNED_NUMBER
+      %import common.WS
+      %ignore WS
+''', start='term', ambiguity='explicit')
 ts = term_parser.parse(r'1 * 2 + 3')
 print(ts.pretty())
 ts = term_parser.parse(r'1 + 2 + 3')
 print(ts.pretty())
 ts = term_parser.parse(r'(1 + 2) + 3')
+print(ts.pretty())
+ts = term_parser.parse(r'(z + y) + x')
+print(ts.pretty())
+ts = term_parser.parse(r'1 -> 2 -> 3')
+print(ts.pretty())
+ts = term_parser.parse(r'1 + 2 -> 3')
+print(ts.pretty())
+ts = term_parser.parse(r'1 -> (2 + 3)')
+print(ts.pretty())
+ts = term_parser.parse(r'1 -> (2 + 3)')
 print(ts.pretty())
