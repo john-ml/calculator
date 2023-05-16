@@ -187,7 +187,6 @@ def make_parser():
     )
     return f'''
       ?term : atom{lines}
-      | name "." term -> binding
   
       ?atom : name -> var
       | ESCAPED_STRING -> string
@@ -315,7 +314,8 @@ def make_parser():
     '''
   def make_parser(ps):
     fancy_grammar = make_fancy_grammar(global_prec_order, ps)
-    return L.Lark(make_grammar(ps), start='term', ambiguity='explicit')
+    grammar = make_grammar(ps)
+    return L.Lark(grammar, start='term', ambiguity='explicit')
   class Parens:
     '''
     An explicit parenthesization.
@@ -712,12 +712,6 @@ if __name__ == '__main__':
   expect(V(Name('a')), global_parser.parse('a'))
   expect(V(Name('snake_case123')), global_parser.parse('snake_case123'))
   expect(V(Name('_abc')), global_parser.parse('_abc'))
-
-  # Parsing of binding forms
-  expect(F(Name('x'), V(Name('x'))), global_parser.parse('x. x'))
-  expect(F(Name('x'), V(Name('y'))), global_parser.parse('x. y'))
-  # The bad parse (x. x). x is discarded because the call to F.__init__ raises
-  expect(F(Name('x'), F(Name('x'), V(Name('x')))), global_parser.parse('x. x. x')) 
 
   # Parsing of quantified formulas
   # Note: tests are happening up to renaming of bound variables, because
