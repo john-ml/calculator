@@ -63,25 +63,7 @@ def trace(m, bound=10):
     except Stuck: break
   return res
 
-def P(s): return S.global_parser.parse(s)
-
-class Prog:
-  def __init__(self):
-    self.state = []
-
-  def on_input(self, cmds):
-    def go(stack, cmds):
-      match stack, cmds:
-        case stack, []:
-          self.state = stack
-          return stack
-        case [*stack, v, w], ['+', *cmds]: return go([*stack, v + w], cmds)
-        case [*stack, v, w], ['*', *cmds]: return go([*stack, v * w], cmds)
-        case stack, [c, *cmds]: return go([*stack, float(c)], cmds)
-    return str(go(self.state, cmds))
-
-  def tex(self, s):
-    return f'{s}'
+# ----------
 
 def base64image(path):
   import base64
@@ -93,7 +75,6 @@ def img(path):
   return f'<img src="data:image/png;base64,{base64image(path)}"></img>'
 
 app = Flask(__name__)   
-prog = Prog()
 
 @app.route('/', methods = ['GET'])
 def main():
@@ -107,15 +88,10 @@ def on_input():
   print('Received input:', s)
   try:
     m = S.global_parser.parse(s)
-    # steps = '\\longrightarrow '.join(n.str("tex") for n in trace(m, bound=30))
     steps = '\\longrightarrow '.join([n.simple_names().str("tex") for n in trace(m, bound=400)][-1:])
     return f'$\\displaystyle \\cdots \\longrightarrow {steps}$'
   except Exception as e:
     return H.escape(str(e))
-  # except Exception as e: return repr(e)
-  # try: return prog.on_input(s.split())
-  # try: return prog.tex(s)
-  # try: return str(eval(s))
   # except: return img('serverok.png')
 
 if __name__ == '__main__':
