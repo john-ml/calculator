@@ -4,14 +4,24 @@ import networkx as N
 # Global poset on cursor positions used by pretty-printer (see help(mixfix))
 from preorder import Preorder
 global_prec_order = Preorder().add_bot('bot').add_top('top')
+parser_up_to_date = True
 def to_prec(p): return p.__name__ if type(p) is type else p
-def add_prec(p): global_prec_order.add(to_prec(p))
-def prec_ge(p, q): global_prec_order.add_le(to_prec(q), to_prec(p))
+def add_prec(p):
+  global_prec_order.add(to_prec(p))
+  parser_up_to_date = False
+def prec_ge(p, q):
+  global_prec_order.add_le(to_prec(q), to_prec(p))
+  parser_up_to_date = False
 def prec_ges(pqs):
   for p, q in pqs:
     prec_ge(p, q)
-def prec_bot(p): global_prec_order.add_bot(to_prec(p))
-def prec_top(p): global_prec_order.add_top(to_prec(p))
+  parser_up_to_date = False
+def prec_bot(p):
+  global_prec_order.add_bot(to_prec(p))
+  parser_up_to_date = False
+def prec_top(p):
+  global_prec_order.add_top(to_prec(p))
+  parser_up_to_date = False
 
 # ---------- Name binding ----------
 
@@ -319,8 +329,7 @@ def make_parser():
       %import common.WS
       %ignore WS
     '''
-  def make_parser(ps):
-    grammar = make_fancy_grammar(global_prec_order, ps)
+  def make_parser(grammar):
     return L.Lark(grammar, start='term', ambiguity='explicit')
   class Parens:
     '''
@@ -366,30 +375,34 @@ def make_parser():
     return T()
   productions = []
   constructors = {} # mapping from names of classes to themselves
-  up_to_date = True
-  # invariant: up_to_date ==> the 2 equalities below always hold
-  parser = make_parser(productions)
+  global parser_up_to_date
+  # invariant: parser_up_to_date ==> the equalities below always hold
+  grammar = make_fancy_grammar(global_prec_order, productions)
+  parser = make_parser(grammar)
   transformer = make_transformer(constructors)
   class Parser:
     @staticmethod
     def add_production(p):
-      nonlocal up_to_date, productions, parser, transformer
+      global parser_up_to_date
+      nonlocal productions, parser, transformer
       productions.append(p)
       constructors[classname_to_nt(p[0].__name__)] = p[0]
-      up_to_date = False
+      parser_up_to_date = False
     @staticmethod
     def update_parser():
-      nonlocal up_to_date, parser, transformer
-      if up_to_date: return
-      parser = make_parser(productions)
+      global parser_up_to_date
+      nonlocal parser, transformer
+      if parser_up_to_date: return
+      grammar = make_fancy_grammar(global_prec_order, productions)
+      parser = make_parser(grammar)
       transformer = make_transformer(constructors)
-      up_to_date = True
+      parser_up_to_date = True
     @staticmethod
     def parses(s):
       '''
       Returns the parses that stringify to s up to whitespace and extra parens.
       '''
-      nonlocal up_to_date, parser, transformer
+      nonlocal parser, transformer
       Parser.update_parser()
       forest = parser.parse(s)
       parses = []
@@ -419,8 +432,9 @@ def make_parser():
         case parses: raise ValueError(f"Ambiguous parse for {s}. Parses:\n{parses}")
     @staticmethod
     def current_grammar():
-      nonlocal productions
-      return make_grammar(productions)
+      nonlocal grammar
+      Parser.update_parser()
+      return grammar
   return Parser()
 global_parser = make_parser()
 del make_parser
