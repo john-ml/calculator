@@ -279,7 +279,7 @@ def make_parser():
     make_lr = lambda s, t: canon_lr[canon[s], canon[t]]
     def go(lr):
       nonlocal prec_order, productions, ps
-      lr = canon_lr[lr]
+      assert lr == canon_lr[lr]
       str_lr = str_of_lr(lr)
       if str_lr in productions: return
       productions[str_lr] = []
