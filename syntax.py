@@ -268,7 +268,7 @@ def make_parser():
       - {(u, w) for u, v in d2plus.edges if lr_ok(v) for w in d2plus.successors(v) if lr_ok(w)}
     )
     # Small optimization to clean up the generated grammar: if (l,r) has exactly
-    # one successor (l',r') in prec_graph, replace (l,r) with (l',r') throughout
+    # one successor (l',r') in prec_graph, replace (l,r) with (l',r') throughout.
     canon_lr = {}
     for lr in prec_graph.nodes:
       succs = tuple(prec_graph.successors(lr))
@@ -278,11 +278,15 @@ def make_parser():
     eclass_of_id = tuple(partition)
     id_of_eclass = {eclass: i for i, eclass in enumerate(eclass_of_id)}
     # str_of_lr = lambda l, r: f'term_{repr(set(l))}_{repr(set(r))}' # Useful for debugging
-    str_of_lr = lambda lr: f'term_{id_of_eclass[lr[0]]}_{id_of_eclass[lr[1]]}'
+    make_lr = lambda s, t: canon_lr[canon[s], canon[t]]
+    bot_lr = make_lr('bot', 'bot')
+    def str_of_lr(lr):
+      if lr == bot_lr: return 'term'
+      l, r = lr
+      return f'term_{id_of_eclass[l]}_{id_of_eclass[r]}'
     # Maps strings of the form str_of_lr(l, r) to a list of strings encoding productions
     productions = {} 
     # Populate productions by recursively traversing prec_graph
-    make_lr = lambda s, t: canon_lr[canon[s], canon[t]]
     def go(lr):
       nonlocal prec_order, productions, ps
       assert lr == canon_lr[lr]
@@ -311,15 +315,12 @@ def make_parser():
       for next_lr in prec_graph.successors(lr):
         productions[str_lr].append(str_of_lr(canon_lr[next_lr]))
         go(next_lr)
-    bot_lr = make_lr('bot', 'bot')
     go(bot_lr)
     str_productions = '\n\n'.join(
       f'      ?{k} : ' + '\n      | '.join(p)
       for k, p in productions.items()
     )
-    return f'''
-      ?term : {str_of_lr(bot_lr)}
-      \n{str_productions}
+    return f'''{str_productions}
 
       ?atom : name -> var
       | ESCAPED_STRING -> string
@@ -335,6 +336,7 @@ def make_parser():
       %ignore WS
     '''
   def make_parser(grammar):
+    print(grammar)
     return L.Lark(grammar, start='term', ambiguity='explicit')
   class Parens:
     '''
