@@ -182,36 +182,36 @@ print(ts.pretty())
 ts = term_parser.parse('(λy.λp.p)(λf.(λx.f(xx))(λx.f(xx)))(λn.n(λt.λf.t)(λn.λt.λf.f))')
 print(ts.pretty())
 
-# # ---------- Auto-factored grammar for arith ----------
+# ---------- Auto-factored grammar for arith ----------
 
-# term_parser = Lark(r'''
-#   ?term : bot_bot
-#   bot_bot : plus_plusq
-#   plus_plusq : plus_plusp "+" plusplus_plusq
-#   | times_timesq
-#   plus_plusp : times_timesq
-#   times_timesq : times_timesp "*" timestimes_timesq
-#   | top_top
-#   times_timesp : top_top
-#   top_top : atom
-#   | "1"
-#   timestimes_timesq : times_timesq
-#   plusplus_plusq : plus_plusq
-#   ?atom : name -> var
-#   | ESCAPED_STRING -> string
-#   | SIGNED_NUMBER -> number
-#   | "(" term ")" -> parens
+term_parser = Lark(r'''
+  ?term : bot_bot
+  bot_bot : plus_plusq
+  plus_plusq : plus_plusp "+" plusplus_plusq
+  | times_timesq
+  plus_plusp : times_timesq
+  times_timesq : times_timesp "*" timestimes_timesq
+  | top_top
+  times_timesp : top_top
+  top_top : atom
+  | "1"
+  timestimes_timesq : times_timesq
+  plusplus_plusq : plus_plusq
+  ?atom : name -> var
+  | ESCAPED_STRING -> string
+  | SIGNED_NUMBER -> number
+  | "(" term ")" -> parens
 
-#   name : CNAME
-#   %import common.CNAME
-#   %import common.ESCAPED_STRING
-#   %import common.SIGNED_NUMBER
-#   %import common.WS
-#   %ignore WS
-# ''', start='term', parser='lalr')
-# ts = term_parser.parse(r'1 * 2 + 3')
-# print(ts.pretty())
-# ts = term_parser.parse(r'1 + 2 + 3')
-# print(ts.pretty())
-# ts = term_parser.parse(r'(1 + 2) + 3')
-# print(ts.pretty())
+  name : CNAME
+  %import common.CNAME
+  %import common.ESCAPED_STRING
+  %import common.SIGNED_NUMBER
+  %import common.WS
+  %ignore WS
+''', start='term', parser='lalr')
+ts = term_parser.parse(r'1 * 2 + 3')
+print(ts.pretty())
+ts = term_parser.parse(r'1 + 2 + 3')
+print(ts.pretty())
+ts = term_parser.parse(r'(1 + 2) + 3')
+print(ts.pretty())
