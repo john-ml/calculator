@@ -65,12 +65,12 @@ def make_parser():
     )
     return f'''
       ?term : atom{lines}
-      | "(" term ")" -> parens
       | name "." term -> binding
   
       ?atom : name -> var
       | ESCAPED_STRING -> string
       | SIGNED_NUMBER -> number
+      | "(" term ")" -> parens
 
       name : CNAME
   
