@@ -261,7 +261,8 @@ def make_parser():
       {(v, w) for v, w in d2plus.edges if lr_ok(w)}
       - {(u, w) for u, v in d2plus.edges if lr_ok(v) for w in d2plus.successors(v) if lr_ok(w)}
     )
-    # If (l,r) has exactly one successor (l',r') in prec_graph, replace (l,r) with (l',r') throughout
+    # Small optimization to clean up the generated grammar: if (l,r) has exactly
+    # one successor (l',r') in prec_graph, replace (l,r) with (l',r') throughout
     canon_lr = {}
     for lr in prec_graph.nodes:
       succs = tuple(prec_graph.successors(lr))
@@ -272,7 +273,7 @@ def make_parser():
     id_of_eclass = {eclass: i for i, eclass in enumerate(eclass_of_id)}
     # str_of_lr = lambda l, r: f'term_{repr(set(l))}_{repr(set(r))}' # Useful for debugging
     str_of_lr = lambda lr: f'term_{id_of_eclass[lr[0]]}_{id_of_eclass[lr[1]]}'
-    # Maps strings of the form str_of_lr(l, r) to a list of productions
+    # Maps strings of the form str_of_lr(l, r) to a list of strings encoding productions
     productions = {} 
     # Populate productions by recursively traversing prec_graph
     make_lr = lambda s, t: canon_lr[canon[s], canon[t]]
