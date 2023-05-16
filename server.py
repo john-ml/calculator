@@ -108,8 +108,8 @@ def on_input():
   try:
     m = S.global_parser.parse(s)
     # steps = '\\longrightarrow '.join(n.str("tex") for n in trace(m, bound=30))
-    steps = '\\longrightarrow '.join(n.simple_names().str("tex") for n in trace(m, bound=30))
-    return f'$\\displaystyle {steps}$'
+    steps = '\\longrightarrow '.join([n.simple_names().str("tex") for n in trace(m, bound=400)][-1:])
+    return f'$\\displaystyle \\cdots \\longrightarrow {steps}$'
   except Exception as e:
     return H.escape(str(e))
   # except Exception as e: return repr(e)

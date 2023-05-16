@@ -860,3 +860,6 @@ if __name__ == '__main__':
     App(snd_y, is_zero),
     global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x))) (\n.n (\t.\f.t) (\n.\t.\f.f))')
   )
+
+  # Really long input that can't be parsed efficiently without good grammar generation
+  global_parser.parse(r'(\Y.\iszero.\add.\z.\s.\cons.\fst.\snd.(\pred.(\tri. tri (s (s (s z)))) (Y (\tri.\n.iszero n z (add n (tri (pred n)))))) (\n.fst (n (\p. cons (snd p) (s (snd p))) (cons z z)))) (\f.(\x.(f (x x))) (\x.(f (x x)))) (\n.n (\n.\t.\f.f) (\t.\f.t)) (\m.\n.\s.\z.m s (n s z)) (\s.\z.z) (\n.\s.\z.s (n s z)) (\x.\y.\f.f x y) (\p.p (\x.\y.x)) (\p.p (\x.\y.y))')
