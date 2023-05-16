@@ -336,7 +336,6 @@ def make_parser():
       %ignore WS
     '''
   def make_parser(grammar):
-    print(grammar)
     return L.Lark(grammar, start='term', ambiguity='explicit')
   class Parens:
     '''
