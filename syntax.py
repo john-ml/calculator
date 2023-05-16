@@ -359,6 +359,7 @@ def make_parser():
         def transform(self, args):
           new_args = []
           fields = [v for _, v in c.__annotations__.items() if type(v) is not Str]
+          # Each field of type F consumes two arguments: one for the name and one for the body
           i = 0
           for v in fields:
             if v is F:
