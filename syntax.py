@@ -43,11 +43,14 @@ def make_parser():
   # So munge class names to fit this format. Assumes no class names contain _
   def classname_to_nt(s): return 'c' + ''.join('_' + c.lower() if c.isupper() else c for c in s)
   def nt_to_classname(s): return ''.join('' if c == '_' else c.upper() if prev == '_' else c for (prev, c) in zip(s[1:], s[2:]))
-  # The grammar is stored as a list of productions on a single nonterminal
-  # 'term'. A production like
-  #   term -> term + term
-  # for a mixfix constructor C is represented as the tuple
-  #   (C, [None, "+", None])
+  # The grammar is stored as a list of productions. A production like
+  #   @mixfix
+  #   class Add:
+  #     m: any
+  #     plus: Str('+')
+  #     n: any
+  # as the tuple
+  #   (C, [('m', None), ('plus', '+'), ('n', None)])
   def make_grammar(ps):
     # TODO could construct the grammar more intelligently using the precedence
     # poset to cut down the number of ambiguities. Essentially each cursor
@@ -58,7 +61,7 @@ def make_parser():
     # precedence and associativity should produce properly-factored ones.
     escape = lambda s: f'"{repr(s)[1:-1]}"'
     lines = ''.join(
-      f'\n      | {" ".join("term" if s is None else "" if s == "" else escape(s) for s in p)} -> {classname_to_nt(c.__name__)}' for c, p in ps
+      f'\n      | {" ".join("term" if s is None else "" if s == "" else escape(s) for _, s in p)} -> {classname_to_nt(c.__name__)}' for c, p in ps
     )
     return f'''
       ?term : atom{lines}
@@ -313,14 +316,15 @@ def mixfix(c):
   c.fvs = fvs
   c.no_parens = no_parens
   add_prec(c)
+  def make_prec(k): return f'{name}.{k}'
   for k in annotations:
-    prec_name = f'{name}.{k}'
+    prec_name = make_prec(k)
     setattr(c, k, prec_name)
     add_prec(prec_name)
   if not hasattr(c, 'bracket'):
     c.bracket = lambda mode, s: parens(s)
   global global_parser
-  global_parser.add_production((c, [None if type(v) is not Str else v.s for k, v in annotations.items()]))
+  global_parser.add_production((c, [(make_prec(k), None if type(v) is not Str else v.s) for k, v in annotations.items()]))
   return c
 
 # ---------- Name binding ----------
@@ -442,7 +446,7 @@ class F:
       case [V(x), e]: return F(x, e)
       case _: raise ValueError(f'F.transform({repr(args)})')
 
-global_parser.add_production((F, [None, ".", None]))
+global_parser.add_production((F, [('F.x', None), ('F.dot', '.'), ('F.e', None)]))
 
 # ---------- Examples ----------
 

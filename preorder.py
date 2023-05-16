@@ -108,6 +108,7 @@ class Preorder:
     '''
     self.make_skeleton()
     return self.skeleton.successors(eclass)
+  def elements(self): return self.graph.nodes
 
 if __name__ == '__main__':
   g = N.DiGraph([(0, 1), (1, 0), (2, 2), (0, 3), (3, 4)])
