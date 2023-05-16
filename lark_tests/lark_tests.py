@@ -4,7 +4,29 @@ from lark.visitors import CollapseAmbiguities
 
 # ---------- The running example from the tutorial ----------
 
-json_parser = Lark(open('json.lark').read(), start='value')
+json_lark = '''
+  ?value : dict
+         | list
+         | string
+         | SIGNED_NUMBER -> number
+         | "true" -> true
+         | "false" -> false
+         | "null" -> null
+  
+  list : "[" [value ("," value)*] "]"
+  
+  dict : "{" [pair ("," pair)*] "}"
+  pair : string ":" value
+  
+  string : ESCAPED_STRING
+  
+  %import common.ESCAPED_STRING
+  %import common.SIGNED_NUMBER
+  %import common.WS
+  %ignore WS
+'''
+
+json_parser = Lark(json_lark, start='value')
 json = '{"key": ["s", "\\n", 3.14, true, null]}'
 print(json_parser.parse(json))
 print(json_parser.parse(json).pretty())
@@ -36,19 +58,40 @@ def inline_transformer(f, xs):
     case 'dict': return dict(xs)
     case _: return Tree(f, xs)
 
-json_parser = Lark(open('json.lark').read(), start='value', tree_class=inline_transformer)
+json_parser = Lark(json_lark, start='value', tree_class=inline_transformer)
 json = '{"key": ["s", "\\n", 3.14, true, null]}'
 print(json_parser.parse(json))
 
 # ---------- Trying out an ambiguous arithmetic grammar ----------
 
-term_parser = Lark(open('amb.lark').read(), start='term')
+amb_lark = '''
+  ?term : literal
+  | term "+" term -> add
+  | term "-" term -> sub
+  | term "*" term -> mul
+  | term "/" term -> div
+  | "(" term ")"
+  
+  ?literal : string
+  | SIGNED_NUMBER -> number
+  | "true" -> true
+  | "false" -> false
+  
+  string : ESCAPED_STRING
+  
+  %import common.ESCAPED_STRING
+  %import common.SIGNED_NUMBER
+  %import common.WS
+  %ignore WS
+'''
+
+term_parser = Lark(amb_lark, start='term')
 print(term_parser.parse('1 + 1 + 1').pretty())
 print(term_parser.parse('(1 + 1) + 1').pretty())
 print(term_parser.parse('1 * 1 + 1').pretty())
 print(term_parser.parse('1 + 1 * 1').pretty())
 print('-'*10)
-term_parser = Lark(open('amb.lark').read(), start='term', ambiguity='explicit')
+term_parser = Lark(amb_lark, start='term', ambiguity='explicit')
 ts = term_parser.parse('1 * 1 + 1 + 1')
 for t in CollapseAmbiguities().transform(ts): print(t.pretty())
 print(ts)
@@ -67,13 +110,28 @@ def evaluate(op, xs):
     case 'number', [x]: return float(x)
     case _, _: assert False
 
-term_parser = Lark(open('amb.lark').read(), start='term', tree_class=evaluate)
+term_parser = Lark(amb_lark, start='term', tree_class=evaluate)
 term = '1 + 1 + 1'
 print(term_parser.parse(term))
 
 # ---------- Trying out an ambiguous LC grammar ----------
 
-term_parser = Lark(open('lc.lark').read(), start='term', ambiguity='explicit')
+lc_lark = r'''
+  ?term : literal
+  | term " " term
+  | "\\" term "." term
+  | "(" term ")"
+
+  ?literal : CNAME -> identifier
+  | SIGNED_NUMBER -> number
+
+  %import common.CNAME
+  %import common.SIGNED_NUMBER
+  %import common.WS
+  %ignore WS
+'''
+
+term_parser = Lark(lc_lark, start='term', ambiguity='explicit')
 ts = term_parser.parse(r'(\x.x x) (\x. x x)')
 print(ts.pretty())
 
@@ -123,3 +181,37 @@ ts = term_parser.parse('λf.λg.λx.fx(gx)')
 print(ts.pretty())
 ts = term_parser.parse('(λy.λp.p)(λf.(λx.f(xx))(λx.f(xx)))(λn.n(λt.λf.t)(λn.λt.λf.f))')
 print(ts.pretty())
+
+# # ---------- Auto-factored grammar for arith ----------
+
+# term_parser = Lark(r'''
+#   ?term : bot_bot
+#   bot_bot : plus_plusq
+#   plus_plusq : plus_plusp "+" plusplus_plusq
+#   | times_timesq
+#   plus_plusp : times_timesq
+#   times_timesq : times_timesp "*" timestimes_timesq
+#   | top_top
+#   times_timesp : top_top
+#   top_top : atom
+#   | "1"
+#   timestimes_timesq : times_timesq
+#   plusplus_plusq : plus_plusq
+#   ?atom : name -> var
+#   | ESCAPED_STRING -> string
+#   | SIGNED_NUMBER -> number
+#   | "(" term ")" -> parens
+
+#   name : CNAME
+#   %import common.CNAME
+#   %import common.ESCAPED_STRING
+#   %import common.SIGNED_NUMBER
+#   %import common.WS
+#   %ignore WS
+# ''', start='term', parser='lalr')
+# ts = term_parser.parse(r'1 * 2 + 3')
+# print(ts.pretty())
+# ts = term_parser.parse(r'1 + 2 + 3')
+# print(ts.pretty())
+# ts = term_parser.parse(r'(1 + 2) + 3')
+# print(ts.pretty())
