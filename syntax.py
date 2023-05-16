@@ -255,65 +255,63 @@ def make_parser():
     d2 = N.strong_product(d, d) # strong_product = includes edges (v,w),(v,w') for w->w' in D
     d2plus = N.transitive_closure(d2)
     # Compute graph giving nontrivial successors for any pair (l, r)
-    def lr_ok(lr):
-      l, r = lr
-      if (l, r) in ps_at: return True # (l, r) is left- and right-prec of some grammar production
-      else: return 'top' in l and 'top' in r
+    lr_is_top = lambda lr: 'top' in lr[0] and 'top' in lr[1]
+    lr_ok = lambda lr: lr in ps_at or lr_is_top(lr)
     prec_graph = d2plus.edge_subgraph(
       {(v, w) for v, w in d2plus.edges if lr_ok(w)}
       - {(u, w) for u, v in d2plus.edges if lr_ok(v) for w in d2plus.successors(v) if lr_ok(w)}
     )
     # If (l,r) has exactly one successor (l',r') in prec_graph, replace (l,r) with (l',r') throughout
-    inline_sing = {}
+    canon_lr = {}
     for lr in prec_graph.nodes:
       succs = tuple(prec_graph.successors(lr))
-      if lr not in ps_at and len(succs) == 1: inline_sing[lr] = succs[0]
-      else: inline_sing[lr] = lr
+      if lr not in ps_at and len(succs) == 1: canon_lr[lr] = succs[0]
+      else: canon_lr[lr] = lr
     # Associate each pair (l, r) : eclass^2 to a unique Lark-friendly identifier
     eclass_of_id = tuple(partition)
     id_of_eclass = {eclass: i for i, eclass in enumerate(eclass_of_id)}
     # str_of_lr = lambda l, r: f'term_{repr(set(l))}_{repr(set(r))}' # Useful for debugging
-    str_of_lr = lambda l, r: f'term_{id_of_eclass[l]}_{id_of_eclass[r]}'
-    productions = {} # maps strings of the form str_of_lr(l, r) to a list of productions
+    str_of_lr = lambda lr: f'term_{id_of_eclass[lr[0]]}_{id_of_eclass[lr[1]]}'
+    # Maps strings of the form str_of_lr(l, r) to a list of productions
+    productions = {} 
     # Populate productions by recursively traversing prec_graph
-    def go(l, r):
+    make_lr = lambda s, t: canon_lr[canon[s], canon[t]]
+    def go(lr):
       nonlocal prec_order, productions, ps
-      l, r = inline_sing[l, r]
-      lr = str_of_lr(l, r)
-      if lr in productions: return
-      productions[lr] = []
-      if 'top' in l and 'top' in r:
-        productions[lr].append('atom')
-      for c, p in ps_at.get((l, r), []):
+      lr = canon_lr[lr]
+      str_lr = str_of_lr(lr)
+      if str_lr in productions: return
+      productions[str_lr] = []
+      if lr_is_top(lr):
+        productions[str_lr].append('atom')
+      for c, p in ps_at.get(lr, []):
         pieces = []
         for (new_l, _), (new_r, v) in zip([(to_prec(c), None)] + p, p):
           if type(v) is str:
             escape = lambda s: f'"{repr(s)[1:-1]}"'
             if v != '': pieces.append(escape(v))
           elif v is F:
-            new_l = canon['bot']
-            new_r = canon[new_r]
+            new_lr = make_lr('bot', new_r)
             pieces.append('name')
             pieces.append('"."')
-            pieces.append(str_of_lr(*inline_sing[new_l, new_r]))
-            go(new_l, new_r)
+            pieces.append(str_of_lr(new_lr))
+            go(new_lr)
           else:
-            new_l = canon[new_l]
-            new_r = canon[new_r]
-            pieces.append(str_of_lr(*inline_sing[new_l, new_r]))
-            go(new_l, new_r)
-        productions[lr].append(f'{" ".join(pieces)} -> {classname_to_nt(c.__name__)}')
-      for next_lr in prec_graph.successors((l, r)):
-        productions[lr].append(str_of_lr(*inline_sing[next_lr]))
-        go(*next_lr)
-    bot_canon = canon['bot']
-    go(bot_canon, bot_canon)
+            new_lr = make_lr(new_l, new_r)
+            pieces.append(str_of_lr(new_lr))
+            go(new_lr)
+        productions[str_lr].append(f'{" ".join(pieces)} -> {classname_to_nt(c.__name__)}')
+      for next_lr in prec_graph.successors(lr):
+        productions[str_lr].append(str_of_lr(canon_lr[next_lr]))
+        go(next_lr)
+    bot_lr = make_lr('bot', 'bot')
+    go(bot_lr)
     str_productions = '\n\n'.join(
       f'      ?{k} : ' + '\n      | '.join(p)
       for k, p in productions.items()
     )
     return f'''
-      ?term : {str_of_lr(*inline_sing[bot_canon, bot_canon])}
+      ?term : {str_of_lr(bot_lr)}
       \n{str_productions}
 
       ?atom : name -> var
