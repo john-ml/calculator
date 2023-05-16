@@ -5,8 +5,8 @@ import lark as L
 def parens(s): return f'({s})'
 
 # Global poset on cursor positions used by pretty-printer (see help(mixfix))
-from poset import Poset
-global_prec_order = Poset().add_bot('bot').add_top('top')
+from preorder import Preorder
+global_prec_order = Preorder().add_bot('bot').add_top('top')
 def to_prec(p): return p.__name__ if type(p) is type else p
 def add_prec(p): global_prec_order.add(to_prec(p))
 def prec_ge(p, q): global_prec_order.add_le(to_prec(q), to_prec(p))

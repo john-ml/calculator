@@ -1,6 +1,6 @@
 import networkx as N
 
-class Poset:
+class Preorder:
   '''
   A poset with support for top and bottom elements.
   Maintains a DAG of poset-element-equivalence-classes, called the 'skeleton',
