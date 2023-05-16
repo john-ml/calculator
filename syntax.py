@@ -73,7 +73,7 @@ class F:
   - F(x:Name, e) represents a term e with free variable x.
     Does not do any freshening.
   Pattern matching against an instance of F produces [x:Name, e:term] with x fresh.
-  Thererfore, while F instances are constructed by F('x', lambda x: e) and F(x, e),
+  Therefore, while F instances are constructed by F('x', lambda x: e) and F(x, e),
   they are pattern-matched against as F([x, e]). This is to ensure that the
   fresh name and its body are extracted together. To support pattern F(x, e) would
   require two different getters for the name and the body. Depending on the order
