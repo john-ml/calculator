@@ -351,7 +351,7 @@ def viz(graph):
   entries = ';\n'.join(entries)
   return f'digraph {{ {entries} }}'
 
-def proper_contract_step(f):
+def contract_step(f):
   from lark.parsers.earley_forest import ForestTransformer, SymbolNode, PackedNode, TokenNode
   from lark.grammar import NonTerminal, TOKEN_DEFAULT_PRIORITY
   from lark.lexer import Token
@@ -407,9 +407,9 @@ def proper_contract_step(f):
   res = T().transform(f)
   return res, made_change
 
-def proper_contract(f):
+def contract(f):
   while True:
-    f, made_change = proper_contract_step(f)
+    f, made_change = contract_step(f)
     if not made_change: return f
 
 def parse_tree(f):
@@ -439,7 +439,7 @@ import pyperclip
 # f = term_parser.parse('a + b + c')
 # f = term_parser.parse('(a * b * c)')
 f = term_parser.parse('2 + 2 + 2')
-f = proper_contract(f)
+f = contract(f)
 g = graph_of(f)
 pyperclip.copy(viz(g))
 print('Graph copied to clipboard')
