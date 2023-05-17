@@ -416,7 +416,7 @@ def make_parser():
     @staticmethod
     def update_parser():
       global parser_up_to_date
-      nonlocal parser, transformer
+      nonlocal grammar, productions, parser, transformer
       if parser_up_to_date: return
       grammar = make_fancy_grammar(global_prec_order, productions)
       parser = make_parser(grammar)
@@ -898,3 +898,4 @@ if __name__ == '__main__':
   global_parser.parse('(((((1 + 1) + 1) + 1) + 1) + 1) + 1')
   global_parser.parse('1 + (1 + (1 + (1 + 1)))')
   global_parser.parse('(((1)))')
+  print(global_parser.current_grammar())

@@ -295,7 +295,6 @@ term_parser = Lark(r'''
       %import common.WS
       %ignore WS
 ''', start='term', ambiguity='forest')
-f = term_parser.parse('((x))')
 
 def graph_of(f):
   graph = {}
@@ -328,7 +327,7 @@ def contract(graph):
     for c in children:
       go(v, c)
     chop = [(0,0),(1,4),(9,12),(5,8)]
-    if any(f'term_{i}_{j}' in s for i,j in chop) and parent is not None and len(graph[parent][1]) == 1:
+    if (any(f'term_{i}_{j}' in s for i,j in chop)) and parent is not None and len(graph[parent][1]) == 1:
       graph[parent][1] = graph[v][1]
   go(None, id(f))
 
@@ -348,7 +347,10 @@ def gc(graph, roots):
   for v in extracted:
     graph[v] = extracted[v]
 
+import pyperclip
+
+f = term_parser.parse('(((x)))')
 g = graph_of(f)
 contract(g)
 gc(g, [id(f)])
-print(viz(g))
+pyperclip.copy(viz(g))
