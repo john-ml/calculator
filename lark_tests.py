@@ -336,7 +336,7 @@ def graph_of(f):
   def go(or_node, f):
     nonlocal graph
     if id(f) in graph: return
-    graph[id(f)] = [str(f) + ' ' + str(type(f)), or_node, []] if not hasattr(f, 'children') else [str(f.s) + ' ' + str(type(f.s)) + ' ' + str(f) + ' ' + str(type(f)) + ' ' + str(f.is_intermediate if 'SymbolNode' in str(type(f)) else ''), or_node, list(map(id, f.children))]
+    graph[id(f)] = [str(f) + '\n' + str(type(f)), or_node, []] if not hasattr(f, 'children') else [str(type(f)) + '\n' + str(f.s) + '\n' + str(type(f.s)), or_node, list(map(id, f.children))]
     if hasattr(f, 'children'):
       for c in f.children:
         go(not or_node, c)
@@ -421,9 +421,9 @@ def parse_tree(f):
 
 import pyperclip
 
-# f = term_parser.parse('(((x)))')
+f = term_parser.parse('(((x)))')
 # f = term_parser.parse('(((x y)))')
-f = term_parser.parse('(a) (b) (c) (d)')
+# f = term_parser.parse('(a) (b) (c) (d)')
 # f = term_parser.parse('x')
 f = proper_contract(f)
 g = graph_of(f)
