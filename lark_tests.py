@@ -410,7 +410,7 @@ def gc(graph, roots):
   for v in extracted:
     graph[v] = extracted[v]
 
-def proper_contract(f):
+def proper_contract_step(f):
   from lark.parsers.earley_forest import ForestTransformer, SymbolNode, PackedNode, TokenNode
   from lark.grammar import NonTerminal, TOKEN_DEFAULT_PRIORITY
   from lark.lexer import Token
@@ -425,14 +425,13 @@ def proper_contract(f):
         and packed_node_is_singleton(data[0])
       )
       if can_contract:
-        nonlocal made_change
-        made_change = True
+        nonlocal made_change; made_change = True
         if data[0].left is None: return data[0].right
         else: return data[0].left
       else:
         s = SymbolNode(node.s, node.start, node.end)
-        # Probably sinful, but I don't see another way to get at the children of these nodes
-        s._children = set(data)
+        for c in data:
+          s.add_family(c.s, c.rule, c.start, c.left, c.right)
         return s
     def transform_intermediate_node(self, node, data):
       can_contract = (
@@ -440,14 +439,13 @@ def proper_contract(f):
         and packed_node_is_singleton(data[0])
       )
       if can_contract:
-        nonlocal made_change
-        made_change = True
+        nonlocal made_change; made_change = True
         if data[0].left is None: return data[0].right
         else: return data[0].left
       else:
         s = SymbolNode(node.s, node.start, node.end)
-        # Probably sinful, but I don't see another way to get at the children of these nodes
-        s._children = set(data)
+        for c in data:
+          s.add_family(c.s, c.rule, c.start, c.left, c.right)
         return s
     def transform_packed_node(self, node, data):
       match data:
@@ -468,30 +466,24 @@ def proper_contract(f):
   res = T().transform(f)
   return res, made_change
 
+def proper_contract(f):
+  while True:
+    f, made_change = proper_contract_step(f)
+    if not made_change: return f
+
+def parse_tree(f):
+  from lark.parsers.earley_forest import TreeForestTransformer
+  return TreeForestTransformer(resolve_ambiguity=False).transform(f)
+
 import pyperclip
 
 # f = term_parser.parse('(((x)))')
-f = term_parser.parse('(((x y)))')
-while True:
-  f, made_change = proper_contract(f)
-  if not made_change: break
+# f = term_parser.parse('(((x y)))')
+f = term_parser.parse('(a) (b) (c) (d)')
+# f = term_parser.parse('x')
+f = proper_contract(f)
 g = graph_of(f)
 gc(g, [id(f)])
 pyperclip.copy(viz(g))
 print('Graph copied to clipboard')
-
-def parse_tree(f):
-  from lark.parsers.earley_forest import TreeForestTransformer, SymbolNode, PackedNode, TokenNode
-  from lark.grammar import NonTerminal, TOKEN_DEFAULT_PRIORITY
-  from lark.lexer import Token
-  from lark import Tree
-  class T(TreeForestTransformer):
-    def c_app(self, data):
-      print('c_app', data)
-      return ('c_app', data)
-    def parens(self, data):
-      print('parens', data)
-      return ('parens', data)
-  return T().transform(f)
-
-print(parse_tree(f))
+print(parse_tree(f).pretty())
