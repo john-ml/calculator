@@ -354,62 +354,6 @@ def viz(graph):
   entries = ';\n'.join(entries)
   return f'digraph {{ {entries} }}'
 
-# Manually implement filtering of ?nonterm
-def contract(graph):
-  visited = set()
-  def go(parent, v):
-    nonlocal visited
-    if v in visited: return
-    s, or_node, children = graph[v]
-    for i, c in enumerate(children):
-      go((v, i), c)
-    chop = [
-      "'term'",
-      'atom',
-      'term_1_4',
-      'term_0_0',
-      'term_9_12',
-      'term_5_8',
-      'term_13_16',
-      'term_29_16',
-      'term_17_16',
-      'term_19_15',
-      'term_22_25',
-      'term_29_25',
-      'term_26_24',
-    ]
-    if parent is not None and (any(t in s for t in chop)) and or_node and len(children) == 1 and len(graph[children[0]][2]) == 1:
-      p, i = parent
-      graph[p][2][i] = graph[children[0]][2][0]
-  go(None, id(f))
-
-# Coalesce OR-node children that are the same to increase sharing
-def coalesce(graph):
-  while True:
-    done = True
-    for v in tuple(v for v in graph):
-      _, or_node, children = graph[v]
-      deduplicated = set(tuple(graph[w][2]) for w in children)
-      if or_node and len(children) > 1 and len(deduplicated) == 1:
-        graph[v][2] = [children[0]]
-        done = False
-    if done: return
-
-def gc(graph, roots):
-  extracted = {}
-  def go(v):
-    if v in extracted: return
-    extracted[v] = graph[v]
-    _, _, children = graph[v]
-    for c in children:
-      go(c)
-  for root in roots:
-    go(root)
-  for k in tuple(k for k in graph):
-    del graph[k]
-  for v in extracted:
-    graph[v] = extracted[v]
-
 def proper_contract_step(f):
   from lark.parsers.earley_forest import ForestTransformer, SymbolNode, PackedNode, TokenNode
   from lark.grammar import NonTerminal, TOKEN_DEFAULT_PRIORITY
@@ -483,7 +427,6 @@ f = term_parser.parse('(a) (b) (c) (d)')
 # f = term_parser.parse('x')
 f = proper_contract(f)
 g = graph_of(f)
-gc(g, [id(f)])
 pyperclip.copy(viz(g))
 print('Graph copied to clipboard')
 print(parse_tree(f).pretty())
