@@ -450,7 +450,7 @@ def make_parser():
         if lhs_matches_rhs:
           v = v.no_parens()
           parses.append(v)
-      print(f'count = {count}, dups = {dups}')
+      # print(f'count = {count}, dups = {dups}')
       return parses
     @staticmethod
     def parse(s):
@@ -894,3 +894,7 @@ if __name__ == '__main__':
   global_parser.parse(r'(\Y.\iszero.\add.\z.\s.\cons.\fst.\snd.(\pred.(\tri. tri (s (s (s z)))) (Y (\tri.\n.iszero n z (add n (tri (pred n)))))) (\n.fst (n (\p. cons (snd p) (s (snd p))) (cons z z)))) (\f.(\x.(f (x x))) (\x.(f (x x)))) (\n.n (\n.\t.\f.f) (\t.\f.t)) (\m.\n.\s.\z.m s (n s z)) (\s.\z.z) (\n.\s.\z.s (n s z)) (\x.\y.\f.f x y) (\p.p (\x.\y.x)) (\p.p (\x.\y.y))')
 
   global_parser.parse('(a) (b) (c) (d) (e)')
+  global_parser.parse('((((((1 + 1) + 1) + 1) + 1) + 1) + 1)')
+  global_parser.parse('(((((1 + 1) + 1) + 1) + 1) + 1) + 1')
+  global_parser.parse('1 + (1 + (1 + (1 + 1)))')
+  global_parser.parse('(((1)))')

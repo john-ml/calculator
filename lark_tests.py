@@ -263,3 +263,92 @@ ts = term_parser.parse(r'1 -> (2 + 3)')
 print(ts.pretty())
 ts = term_parser.parse(r'1 -> (2 + 3)')
 print(ts.pretty())
+
+# ---------- Playing with SPPFs ----------
+
+term_parser = Lark(r'''
+      ?term : term_5_8
+      | term_9_12
+
+      ?term_5_8 : term_1_4 "+" term_5_8 -> c_plus
+      | term_1_4
+
+      ?term_1_4 : term_0_0 "*" term_1_4 -> c_times
+      | term_0_0
+
+      ?term_0_0 : atom
+      | "1" -> c_top
+
+      ?term_9_12 : term_5_8 "->" term_9_12 -> c_pow
+      | term_0_0
+
+      ?atom : name -> var
+      | ESCAPED_STRING -> string
+      | SIGNED_NUMBER -> number
+      | "(" term ")" -> parens
+
+      name : CNAME
+
+      %import common.CNAME
+      %import common.ESCAPED_STRING
+      %import common.SIGNED_NUMBER
+      %import common.WS
+      %ignore WS
+''', start='term', ambiguity='forest')
+f = term_parser.parse('((x))')
+
+def graph_of(f):
+  graph = {}
+  def go(f):
+    nonlocal graph
+    if id(f) in graph: return
+    graph[id(f)] = [str(f), []] if not hasattr(f, 'children') else [str(f.s) + ' ' + str(f), list(map(id, f.children))]
+    if hasattr(f, 'children'):
+      for c in f.children:
+        go(c)
+  go(f)
+  return graph
+
+def viz(graph):
+  entries = []
+  for v, (pretty, _) in graph.items():
+    entries.append(f'v{v} [label={repr(pretty)}]')
+  for v, (_, children) in graph.items():
+    for i, c in enumerate(children):
+      entries.append(f'v{v} -> v{c} [label={i}]')
+  entries = ';\n'.join(entries)
+  return f'digraph {{ {entries} }}'
+
+def contract(graph):
+  visited = set()
+  def go(parent, v):
+    nonlocal visited
+    if v in visited: return
+    s, children = graph[v]
+    for c in children:
+      go(v, c)
+    chop = [(0,0),(1,4),(9,12),(5,8)]
+    if any(f'term_{i}_{j}' in s for i,j in chop) and parent is not None and len(graph[parent][1]) == 1:
+      graph[parent][1] = graph[v][1]
+  go(None, id(f))
+
+def gc(graph, roots):
+  extracted = {}
+  def go(v):
+    nonlocal extracted
+    if v in extracted: return
+    extracted[v] = graph[v]
+    _, children = graph[v]
+    for c in children:
+      go(c)
+  for root in roots:
+    go(root)
+  for k in tuple(k for k in graph):
+    del graph[k]
+  for v in extracted:
+    graph[v] = extracted[v]
+
+g = graph_of(f)
+contract(g)
+gc(g, [id(f)])
+print(viz(g))
