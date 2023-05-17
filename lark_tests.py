@@ -275,9 +275,7 @@ term_parser = Lark(r'''
       | term_22_25
       | term_26_24
 
-      c_plus : term_1_4 "+" term_5_8
-
-      ?term_5_8 : c_plus
+      ?term_5_8 : term_1_4 "+" term_5_8 -> c_plus
       | term_1_4
 
       ?term_1_4 : term_0_0 "*" term_1_4 -> c_times
@@ -314,13 +312,12 @@ term_parser = Lark(r'''
 
       c_app : term_26_24 " " term_0_0
 
-      ?atom : name
+      ?atom : name -> var
       | ESCAPED_STRING -> string
       | SIGNED_NUMBER -> number
-      | parens
+      | "(" term ")" -> parens
 
       name : CNAME
-      parens : "(" term ")"
 
       %import common.CNAME
       %import common.ESCAPED_STRING
@@ -362,7 +359,7 @@ def proper_contract_step(f):
   made_change = False
   class T(ForestTransformer):
     def transform_symbol_node(self, node, data):
-      contractible = lambda s: s.name.startswith('term') or s.name in {'atom', 'term'}
+      contractible = lambda s: s.name.startswith('term')
       can_contract = (
         contractible(node.s)
         and len(data) == 1
@@ -419,14 +416,33 @@ def parse_tree(f):
   from lark.parsers.earley_forest import TreeForestTransformer
   return TreeForestTransformer(resolve_ambiguity=False).transform(f)
 
+def strip_tokens(f):
+  import syntax as S
+  class T(Transformer):
+    def __default_token__(self, token): return token.value
+    def name(self, data): return S.Name(data[0])
+    def var(self, data): return S.V(data[0])
+    def string(self, data): return Tree('string', data)
+    def number(self, data): return Tree('number', data)
+    def parens(self, data): return Tree('parens', [data[1]])
+    def __default__(self, data, children, meta):
+      return Tree(data, [c for c in children if type(c) is not str])
+  return T().transform(f)
+
 import pyperclip
 
-f = term_parser.parse('(((x)))')
+# f = term_parser.parse('(((x)))')
 # f = term_parser.parse('(((x y)))')
 # f = term_parser.parse('(a) (b) (c) (d)')
 # f = term_parser.parse('x')
+# f = term_parser.parse(r'(\x.x) (\x.x)')
+# f = term_parser.parse('a + b + c')
+# f = term_parser.parse('(a * b * c)')
+f = term_parser.parse('2 + 2 + 2')
 f = proper_contract(f)
 g = graph_of(f)
 pyperclip.copy(viz(g))
 print('Graph copied to clipboard')
-print(parse_tree(f).pretty())
+t = parse_tree(f)
+t = strip_tokens(t)
+print(t.pretty())
