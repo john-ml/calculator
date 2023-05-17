@@ -90,7 +90,7 @@ def on_input():
     m = S.global_parser.parse(s)
     steps = [n.simple_names().str("tex") for n in trace(m, bound=800)]
     str_steps = '\\longrightarrow '.join(steps[-1:])
-    return f'$\\displaystyle \\cdots \\stackrel{{{len(steps)}}}\\longrightarrow {str_steps}$'
+    return f'$\\displaystyle \\cdots \\stackrel{{{len(steps)-1}}}\\longrightarrow {str_steps}$'
   except Exception as e:
     return H.escape(str(e))
   # except: return img('serverok.png')
