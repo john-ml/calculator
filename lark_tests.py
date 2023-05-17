@@ -411,19 +411,22 @@ def gc(graph, roots):
     graph[v] = extracted[v]
 
 def proper_contract(f):
-  from lark.parsers.earley_forest import ForestTransformer, SymbolNode, PackedNode
-  from lark.grammar import NonTerminal
+  from lark.parsers.earley_forest import ForestTransformer, SymbolNode, PackedNode, TokenNode
+  from lark.grammar import NonTerminal, TOKEN_DEFAULT_PRIORITY
   from lark.lexer import Token
   packed_node_is_singleton = lambda node: (node.left is None, node.right is None) in {(True, False), (False, True)}
+  made_change = False
   class T(ForestTransformer):
     def transform_symbol_node(self, node, data):
-      contractible = lambda s: s.name.startswith('term') or s.name in {'atom'}
+      contractible = lambda s: s.name.startswith('term') or s.name in {'atom', 'term'}
       can_contract = (
         contractible(node.s)
         and len(data) == 1
         and packed_node_is_singleton(data[0])
       )
       if can_contract:
+        nonlocal made_change
+        made_change = True
         if data[0].left is None: return data[0].right
         else: return data[0].left
       else:
@@ -433,11 +436,12 @@ def proper_contract(f):
         return s
     def transform_intermediate_node(self, node, data):
       can_contract = (
-        False and
         len(data) == 1
         and packed_node_is_singleton(data[0])
       )
       if can_contract:
+        nonlocal made_change
+        made_change = True
         if data[0].left is None: return data[0].right
         else: return data[0].left
       else:
@@ -447,41 +451,47 @@ def proper_contract(f):
         return s
     def transform_packed_node(self, node, data):
       match data:
-        case []: return PackedNode(node.parent, node.s, node.rule, node.start, None, None)
         case [p]: return PackedNode(node.parent, node.s, node.rule, node.start, None, p)
-        case [p, q]: 
-          # Ignore string literals found in any intermediate node
-          eligible = lambda s: type(s) is tuple or (type(s) is NonTerminal and s.name not in {'name'})
-          if eligible(node.parent.s): 
-            print('node.parent.s\t', node.parent.s)
-            print('node.s\t\t', node.s)
-            print('p, type(p)\t', p, type(p))
-            print('q, tyqe(q)\t', q, type(q))
-            print()
-          default = lambda: PackedNode(node.parent, node.s, node.rule, node.start, p, q)
-          if eligible(node.parent.s):
-            match type(p) is Token, type(q) is Token:
-              case True, True:
-                print('wat', node, type(node), type(p), type(q), p, q)
-                return default()
-              case True, _ if len(q.children) == 1: return q.children[0]
-              case _, True if len(p.children) == 1: return p.children[0]
-              case _: return default()
-          else: return default()
+        case [p, q]: return PackedNode(node.parent, node.s, node.rule, node.start, p, q)
         case _: assert False
     def transform_token_node(self, node):
-      return node
-  return T().transform(f)
+      # Hack: node is a Token and there's no way to reconstruct a TokenNode
+      # because need access to a TerminalDef but node.type only stores the name
+      # of the terminal. Running contraction twice without this would raise an
+      # error as Token objects do not have .is_intermediate
+      class DummyTerminal:
+        name = node.type
+        pattern = None
+        priority = TOKEN_DEFAULT_PRIORITY
+      TokenNode.is_intermediate = False
+      return TokenNode(node, DummyTerminal)
+  res = T().transform(f)
+  return res, made_change
 
 import pyperclip
 
 # f = term_parser.parse('(((x)))')
-f = term_parser.parse('(x y)')
-f = proper_contract(f)
+f = term_parser.parse('(((x y)))')
+while True:
+  f, made_change = proper_contract(f)
+  if not made_change: break
 g = graph_of(f)
-# contract(g)
-# coalesce(g)
-# contract(g)
 gc(g, [id(f)])
 pyperclip.copy(viz(g))
 print('Graph copied to clipboard')
+
+def parse_tree(f):
+  from lark.parsers.earley_forest import TreeForestTransformer, SymbolNode, PackedNode, TokenNode
+  from lark.grammar import NonTerminal, TOKEN_DEFAULT_PRIORITY
+  from lark.lexer import Token
+  from lark import Tree
+  class T(TreeForestTransformer):
+    def c_app(self, data):
+      print('c_app', data)
+      return ('c_app', data)
+    def parens(self, data):
+      print('parens', data)
+      return ('parens', data)
+  return T().transform(f)
+
+print(parse_tree(f))
