@@ -1109,7 +1109,7 @@ if __name__ == '__main__':
   # Long input that can't be parsed efficiently without good grammar generation
   expect_unambiguous(r'(\Y.\iszero.\add.\z.\s.\cons.\fst.\snd.(\pred.(\tri. tri (s (s (s z)))) (Y (\tri.\n.iszero n z (add n (tri (pred n)))))) (\n.fst (n (\p. cons (snd p) (s (snd p))) (cons z z)))) (\f.(\x.(f (x x))) (\x.(f (x x)))) (\n.n (\n.\t.\f.f) (\t.\f.t)) (\m.\n.\s.\z.m s (n s z)) (\s.\z.z) (\n.\s.\z.s (n s z)) (\x.\y.\f.f x y) (\p.p (\x.\y.x)) (\p.p (\x.\y.y))')
 
-  # Manually contracting SPPF avoids exponential blowups in the number of parse forests
+  # Manually contracting SPPF avoids exponential blowups in the number of parse trees
   expect_unambiguous('(a) (b) (c) (d) (e) (f) (g) (h) (i) (j) (k) (l)')
   # This example requires the custom graph shenanigans; lark's visitors will
   # perform DFS and lead to exponential time
