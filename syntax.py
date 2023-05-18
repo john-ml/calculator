@@ -488,6 +488,7 @@ def make_parser():
       return go(root, None)
 
     def contract_step(graph, root):
+      '''Inline applications of ?term_* nonterminals with one child.'''
       visited = set()
       parents = {}
       for v, node in graph.items():
@@ -545,6 +546,10 @@ def make_parser():
         if not changed: return
 
     def coalesce_step(graph, root):
+      '''
+      Ambiguous nodes may have inlinable ?term_* children that point to the same subgraph.
+      Remove the redundant children.
+      '''
       visited = set()
       def go(v):
         if v in visited: return
