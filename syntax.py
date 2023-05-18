@@ -1,5 +1,6 @@
 import lark as L
 import networkx as N
+from dataclasses import dataclass
 
 # Global poset on cursor positions used by pretty-printer (see help(mixfix))
 from preorder import Preorder
@@ -393,7 +394,7 @@ def make_parser():
   grammar = make_fancy_grammar(global_prec_order, productions)
   parser = make_parser(grammar)
   transformer = make_transformer(constructors)
-  def parse_forest_to_parse_trees(forest):
+  def parse_forest_to_parse_trees(forest, stats):
     # The grammar produced by make_fancy_grammar() seems to guarantee
     # shared packed parse forests (SPPFs) linear in input length for reasonable
     # posets. However, transforming these SPPFs into trees leads to an
@@ -427,7 +428,6 @@ def make_parser():
     # simplification of the graph in a nice way, so for now contract() and
     # coalesce() convert the forest into an explicit, easier-to-traverse graph
     # and do the transformations on that.
-    from dataclasses import dataclass
     @dataclass
     class ASymbolNode:
       s: any
@@ -515,6 +515,7 @@ def make_parser():
                 for p, i in parents[v]:
                   graph[p].children[i] = c
                 parents[c] = parents[v]
+                go(c)
               case _: join([w])
           case ASymbolNode(_, _, _, children): 
             join(children)
@@ -546,10 +547,12 @@ def make_parser():
           del graph[v]
           changed = True
       return changed
-    def contract(graph, root):
+    def contract(graph, root, stats):
       '''Iterate contract_step to a fixed point.'''
+      stats.contract_steps = 0
       while True:
         contract_step(graph, root)
+        stats.contract_steps += 1
         changed = gc(graph, root)
         if not changed: return
     def coalesce_step(graph, root):
@@ -581,9 +584,11 @@ def make_parser():
             for w in children: go(w)
           case ATokenNode(_): return
       return go(root)
-    def coalesce(graph, root):
+    def coalesce(graph, root, stats):
       '''Iterate coalesce to a fixed point.'''
+      stats.coalesce_steps = 0
       while True:
+        stats.coalesce_steps += 1
         coalesce_step(graph, root)
         changed = gc(graph, root)
         if not changed: return
@@ -607,8 +612,8 @@ def make_parser():
           else: return Tree(data, children)
       return T().transform(f)
     g, root = graph_of(forest)
-    contract(g, root)
-    coalesce(g, root)
+    contract(g, root, stats)
+    coalesce(g, root, stats)
     forest = forest_of(g, root)
     tree = parse_tree(forest)
     tree = strip_tokens(tree)
@@ -634,21 +639,32 @@ def make_parser():
     def parses(s, with_stats=False):
       '''
       Returns the parses that stringify to s up to whitespace and extra parens.
+      If with_stats=True, additionally return an object containing the following
+      statistics measuring how bad the parse was:
+        .contract_steps = number of calls to contract_step
+        .coalesce_steps = number of calls to coalesce_step
+        .trees = number of parse trees considered
+        .duplicates = number of duplicate parse trees
+          (Sometimes inlining ?term_ nonterminals produces duplicates)
       '''
       nonlocal parser, transformer
       Parser.update_parser()
       forest = parser.parse(s)
       parses = []
       seen = set()
-      count = 0
-      dups = 0
+      @dataclass
+      class Stats:
+        contract_steps: int = 0
+        coalesce_steps: int = 0
+        trees: int = 0
+        duplicates: int = 0
+      stats = Stats()
       if s == '(((1 + 1)) + (1))':
         pass
-      for tree in parse_forest_to_parse_trees(forest):
-        count += 1
-        # Sometimes the inlining of ?term_ nonterminals produces duplicate parse trees
+      for tree in parse_forest_to_parse_trees(forest, stats):
+        stats.trees += 1
         if tree in seen:
-          dups += 1
+          stats.duplicates += 1
           continue
         seen.add(tree)
         try: v = transformer.transform(tree)
@@ -660,7 +676,7 @@ def make_parser():
         if lhs_matches_rhs:
           v = v.no_parens()
           parses.append(v)
-      if with_stats: return parses, count, dups
+      if with_stats: return parses, stats
       else: return parses
     @staticmethod
     def parse(s, with_stats=False):
@@ -668,12 +684,12 @@ def make_parser():
       Returns the unique parse yielded by parses(), if it exists.
       '''
       if with_stats:
-        parses, count, dups = Parser.parses(s, with_stats=True)
+        parses, stats = Parser.parses(s, with_stats=True)
       else:
         parses = Parser.parses(s, with_stats=False)
       match parses:
         case []: raise ValueError(f'No parse for {s}')
-        case [v]: return (v, count, dups) if with_stats else v
+        case [v]: return (v, stats) if with_stats else v
         case parses: raise ValueError(f"Ambiguous parse for {s}. Parses:\n{parses}")
     @staticmethod
     def current_grammar():
@@ -1105,8 +1121,8 @@ if __name__ == '__main__':
   )
 
   def expect_unambiguous(s):
-    _, count, dups = global_parser.parse(s, with_stats=True)
-    expect((1, 0), (count, dups))
+    _, stats = global_parser.parse(s, with_stats=True)
+    expect((1, 0), (stats.trees, stats.duplicates))
 
   # Long input that can't be parsed efficiently without good grammar generation
   expect_unambiguous(' '.join(r'''
