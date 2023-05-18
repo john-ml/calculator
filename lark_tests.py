@@ -632,7 +632,7 @@ def contract_step(graph, root):
       case ASymbolNode(_, _, _, [w]):
         match graph[w]:
           case APackedNode(_, _, _, [c]):
-            # This does not work: there can be multiple parens and we need to
+            # This does not work: there can be multiple parents and we need to
             # update each parent
             parent, i = parent
             graph[parent].children[i] = c
