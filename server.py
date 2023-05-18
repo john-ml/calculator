@@ -92,7 +92,7 @@ def on_input():
     str_steps = '\\longrightarrow '.join(steps[-1:])
     return f'$\\displaystyle \\cdots \\stackrel{{{len(steps)-1}}}\\longrightarrow {str_steps}$'
   except Exception as e:
-    return H.escape(str(e)) + '<br>' + img('serverok.png')
+    return H.escape(str(e)).replace('\n', '<br>') + '<br>' + img('serverok.png')
 
 if __name__ == '__main__':
   app.run()
