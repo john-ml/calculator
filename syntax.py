@@ -217,8 +217,10 @@ def make_parser():
     # properly-factored ones.
     #
     # General idea: generate
+    #   c : p_r some_string t_q for each production c at prec p with subprecs [r, q]
+    #
     #   ?bot_bot : p_q for each successor (p,q) of (bot,bot) in poset
-    #   ?p_q : p_r s t_q -> c for each production (c, [(r, any), (t, Str(s))])
+    #   ?p_q : c for each production with left- and right-precs p and q
     #       | p'_q' for each successor (p',q') of (p,q) in poset
     #   ...
     #   ?top_top : atom | other top_top productions
