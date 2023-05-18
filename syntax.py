@@ -644,7 +644,7 @@ def make_parser():
         pass
       for tree in parse_forest_to_parse_trees(forest):
         count += 1
-        # Sometimes forest does not share perfectly in highly ambiguous grammars, and there are duplicate trees
+        # Sometimes the inlining of ?term_ nonterminals produces duplicate parse trees
         if tree in seen:
           dups += 1
           continue
