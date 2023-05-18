@@ -282,7 +282,9 @@ term_parser = Lark(r'''
       | term_0_0
 
       ?term_0_0 : atom
-      | "1" -> c_top
+      | c_top
+
+      c_top : "1"
 
       ?term_9_12 : term_5_8 "->" term_9_12 -> c_pow
       | term_0_0
@@ -390,6 +392,7 @@ def contract_step(f):
         return s
     def transform_packed_node(self, node, data):
       match data:
+        case []: return PackedNode(node.parent, node.s, node.rule, node.start, None, None)
         case [p]: return PackedNode(node.parent, node.s, node.rule, node.start, None, p)
         case [p, q]: return PackedNode(node.parent, node.s, node.rule, node.start, p, q)
         case _: assert False
@@ -404,7 +407,9 @@ def contract_step(f):
         priority = TOKEN_DEFAULT_PRIORITY
       TokenNode.is_intermediate = False
       return TokenNode(node, DummyTerminal)
-  res = T().transform(f)
+  transformer = T()
+  transformer.single_visit = True
+  res = transformer.transform(f)
   return res, made_change
 
 def contract(f):
@@ -426,7 +431,10 @@ def strip_tokens(f):
     def number(self, data): return Tree('number', data)
     def parens(self, data): return Tree('parens', [data[1]])
     def __default__(self, data, children, meta):
-      return Tree(data, [c for c in children if type(c) is not str])
+      # if nt_to_classname(data) in constructors:
+      #   return Tree(data, [c for c in children if type(c) is not str])
+      if data.startswith('term') and len(children) == 1: return children[0]
+      else: return Tree(data, children)
   return T().transform(f)
 
 import pyperclip
@@ -438,11 +446,234 @@ import pyperclip
 # f = term_parser.parse(r'(\x.x) (\x.x)')
 # f = term_parser.parse('a + b + c')
 # f = term_parser.parse('(a * b * c)')
-f = term_parser.parse('2 + 2 + 2')
+# f = term_parser.parse('2 + 2 + 2')
+f = term_parser.parse('1 + 1')
 f = contract(f)
 g = graph_of(f)
 pyperclip.copy(viz(g))
 print('Graph copied to clipboard')
+t = parse_tree(f)
+t = strip_tokens(t)
+print(t.pretty())
+
+# ---------- Playing with SPPFs round 2 ----------
+
+term_parser = Lark(r'''
+      ?term : term_5_8
+      | term_9_12
+      | term_13_16
+      | term_17_16
+      | term_19_15
+      | term_22_25
+      | term_26_24
+
+      ?term_5_8 : c_plus
+      | term_1_4
+
+      ?term_1_4 : c_times
+      | term_0_0
+
+      ?term_0_0 : atom
+      | c_top
+
+      ?term_9_12 : c_pow
+      | term_0_0
+
+      ?term_13_16 : c_forall
+      | term_0_0
+
+      ?term_29_16 : term_13_16
+      | term_17_16
+      | term_1_4
+      | term_19_15
+
+      ?term_17_16 : c_exists
+      | term_0_0
+
+      ?term_19_15 : c_eq
+      | term_0_0
+
+      ?term_22_25 : c_lam
+      | term_0_0
+
+      ?term_29_25 : term_22_25
+      | term_26_24
+
+      ?term_26_24 : c_app
+      | term_0_0
+
+      c_top : "1"
+      c_times : term_0_0 "*" term_1_4
+      c_plus : term_1_4 "+" term_5_8
+      c_pow : term_5_8 "->" term_9_12
+      c_exists : "exists " name "." term_29_16
+      c_eq : term_0_0 "=" term_0_0
+      c_forall : "forall " name "." term_29_16
+      c_app : term_26_24 " " term_0_0
+      c_lam : "\\" name "." term_29_25
+
+      ?atom : name -> var
+      | "(" term ")" -> parens
+
+      name : CNAME
+
+      %import common.CNAME
+      %import common.ESCAPED_STRING
+      %import common.SIGNED_NUMBER
+      %import common.WS
+      %ignore WS
+''', start='term', ambiguity='forest')
+
+# f = term_parser.parse('((((((x))))))')
+f = term_parser.parse('(((1 + 1)) + (1))')
+# f = contract(f)
+g = graph_of(f)
+pyperclip.copy(viz(g))
+print('Graph copied to clipboard')
+# t = parse_tree(f)
+# t = strip_tokens(t)
+# print(t.pretty())
+
+# ---------- Since visitors not cooperating, build and manipulate graph manually ----------
+
+from dataclasses import dataclass
+@dataclass
+class ASymbolNode:
+  s: any
+  start: any
+  end: any
+  children: list[int]
+@dataclass
+class APackedNode:
+  s: any
+  rule: any
+  start: any
+  children: list[int]
+@dataclass
+class ATokenNode:
+  node: any
+def graph_of(node):
+  from lark.parsers.earley_forest import TokenNode
+  # Map each vertex's id to one of the above classes
+  graph = {}
+  def go_symbol_node(node):
+    nonlocal graph
+    if id(node) in graph: return
+    if isinstance(node, TokenNode):
+      graph[id(node)] = ATokenNode(node)
+    else:
+      graph[id(node)] = ASymbolNode(node.s, node.start, node.end, [id(c) for c in node.children])
+      for c in node.children:
+        go_packed_node(c)
+  def go_packed_node(node):
+    nonlocal graph
+    if id(node) in graph: return
+    graph[id(node)] = APackedNode(node.s, node.rule, node.start, [id(c) for c in [node.left, node.right] if c is not None])
+    if node.left is not None: go_symbol_node(node.left)
+    if node.right is not None: go_symbol_node(node.right)
+  go_symbol_node(node)
+  return (graph, id(node))
+
+def forest_of(graph, root):
+  from lark.parsers.earley_forest import SymbolNode, PackedNode
+  forest = {}
+  def go(v, parent):
+    nonlocal forest, graph
+    if v in forest: return forest[v]
+    match graph[v]:
+      case ASymbolNode(s, start, end, children):
+        s = SymbolNode(s, start, end)
+        forest[v] = s
+        children = [go(c, s) for c in children]
+        for c in children:
+          s.add_family(c.s, c.rule, c.start, c.left, c.right)
+        return s
+      case APackedNode(s, rule, start, children):
+        assert parent is not None
+        children = [go(c, None) for c in children]
+        match children:
+          case [p]: return PackedNode(parent, s, rule, start, None, p)
+          case [p, q]: return PackedNode(parent, s, rule, start, p, q)
+          case _: assert False
+      case ATokenNode(node): return node
+  return go(root, None)
+
+def viz(graph):
+  entries = []
+  mk_color = lambda or_node: 'blue' if or_node else 'black'
+  for v, node in graph.items():
+    def block(s):
+      n = 30
+      lines = []
+      for i in range(0, len(s), n):
+        lines.append(s[i:min(len(s),i+n)])
+      return '\n'.join(lines)
+    entries.append(f'v{v} [label={repr(block(str(node)))},color={"blue" if isinstance(node, ASymbolNode) else "black"}]')
+  for v, node in graph.items():
+    match node:
+      case ASymbolNode(s, start, end, children):
+        for i, c in enumerate(children):
+          entries.append(f'v{v} -> v{c} [label={i},color=blue]')
+      case APackedNode(s, rule, start, children):
+        for i, c in enumerate(children):
+          entries.append(f'v{v} -> v{c} [label={i}]')
+  entries = ';\n'.join(entries)
+  return f'digraph {{ {entries} }}'
+
+def contract_step(graph, root):
+  visited = set()
+  def go(v, parent):
+    if v in visited: return
+    visited.add(v)
+    def join(children):
+      for c in children:
+        go(c, None)
+    match graph[v]:
+      case ASymbolNode(_, _, _, [w]):
+        match graph[w]:
+          case APackedNode(_, _, _, [c]):
+            # This does not work: there can be multiple parens and we need to
+            # update each parent
+            parent, i = parent
+            graph[parent].children[i] = c
+          case _: join([w])
+      case ASymbolNode(_, _, _, children): join(children)
+      case APackedNode(_, _, _, children):
+        for i, c in enumerate(children):
+          go(c, (v, i))
+      case ATokenNode(_): return
+  return go(root, None)
+
+def gc(graph, root):
+  marked = set()
+  def go(v):
+    nonlocal marked
+    if v in marked: return
+    marked.add(v)
+    match graph[v]:
+      case ASymbolNode(_, _, _, children):
+        for c in children: go(c)
+      case APackedNode(_, _, _, children):
+        for c in children: go(c)
+      case ATokenNode(_): pass
+  go(root)
+  for v in tuple(v for v in graph):
+    if v not in marked:
+      del graph[v]
+
+f = term_parser.parse('x')
+g, root = graph_of(f)
+contract_step(g, root)
+gc(g, root)
+contract_step(g, root)
+gc(g, root)
+contract_step(g, root)
+gc(g, root)
+contract_step(g, root)
+gc(g, root)
+pyperclip.copy(viz(g))
+f = forest_of(g, root)
+g, root = graph_of(f)
 t = parse_tree(f)
 t = strip_tokens(t)
 print(t.pretty())
