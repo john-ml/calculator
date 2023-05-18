@@ -424,9 +424,9 @@ def parse_tree(f):
 def strip_tokens(f):
   import syntax as S
   class T(Transformer):
-    def __default_token__(self, token): return token.value
-    def name(self, data): return S.Name(data[0])
-    def var(self, data): return S.V(data[0])
+    def __default_token__(self, token): return token
+    def name(self, data): return Tree('name', data)
+    def var(self, data): return Tree('var', data)
     def string(self, data): return Tree('string', data)
     def number(self, data): return Tree('number', data)
     def parens(self, data): return Tree('parens', [data[1]])
@@ -622,27 +622,34 @@ def viz(graph):
 
 def contract_step(graph, root):
   visited = set()
-  def go(v, parent):
+  parents = {}
+  for v, node in graph.items():
+    match node:
+      case APackedNode(_, _, _, children):
+        for i, c in enumerate(children):
+          if c not in parents: parents[c] = set()
+          parents[c].add((v, i))
+  def go(v):
     if v in visited: return
     visited.add(v)
     def join(children):
       for c in children:
-        go(c, None)
+        go(c)
     match graph[v]:
-      case ASymbolNode(_, _, _, [w]):
+      case ASymbolNode(s, _, _, [w]) if hasattr(s, 'name') and s.name.startswith('term'):
         match graph[w]:
-          case APackedNode(_, _, _, [c]):
-            # This does not work: there can be multiple parents and we need to
-            # update each parent
-            parent, i = parent
-            graph[parent].children[i] = c
+          case APackedNode(_, _, _, [c]) if v in parents:
+            for p, i in parents[v]:
+              graph[p].children[i] = c
+            parents[c] = parents[v]
           case _: join([w])
-      case ASymbolNode(_, _, _, children): join(children)
+      case ASymbolNode(_, _, _, children): 
+        join(children)
       case APackedNode(_, _, _, children):
-        for i, c in enumerate(children):
-          go(c, (v, i))
+        for c in children:
+          go(c)
       case ATokenNode(_): return
-  return go(root, None)
+  return go(root)
 
 def gc(graph, root):
   marked = set()
@@ -657,20 +664,74 @@ def gc(graph, root):
         for c in children: go(c)
       case ATokenNode(_): pass
   go(root)
+  changed = False
   for v in tuple(v for v in graph):
     if v not in marked:
       del graph[v]
+      changed = True
+  return changed
 
-f = term_parser.parse('x')
+def contract(graph, root):
+  while True:
+    contract_step(graph, root)
+    changed = gc(graph, root)
+    if not changed: return
+
+def coalesce_step(graph, root):
+  visited = set()
+  def go(v):
+    if v in visited: return
+    visited.add(v)
+    match graph[v]:
+      case ASymbolNode(s, _, _, children) if hasattr(s, 'name') and s.name.startswith('term'):
+        term_cases = set()
+        new_children = []
+        for w in children:
+          match graph[w]:
+            case APackedNode(_, _, _, [c]):
+              if c in term_cases: continue
+              term_cases.add(c)
+              new_children.append(w)
+            case _:
+              new_children.append(w)
+        graph[v].children = new_children
+        for c in new_children: go(c)
+      case ASymbolNode(_, _, _, children):
+        for w in children: go(w)
+      case APackedNode(_, _, _, children):
+        for w in children: go(w)
+      case ATokenNode(_): return
+  return go(root)
+
+def coalesce(graph, root):
+  while True:
+    coalesce_step(graph, root)
+    changed = gc(graph, root)
+    if not changed: return
+
+def strip_tokens(f):
+  from lark import Transformer, Tree, Token
+  class T(Transformer):
+    def name(self, data): return Tree('name', data)
+    def var(self, data): return Tree('var', data)
+    def string(self, data): return Tree('string', data)
+    def number(self, data): return Tree('number', data)
+    def parens(self, data): return Tree('parens', [data[1]])
+    def __default__(self, data, children, meta):
+      if data == 'term' or data.startswith('term_') and len(children) == 1: return children[0]
+      elif data in {'c_top', 'c_times', 'c_plus', 'c_pow', 'c_exists', 'c_eq', 'c_forall', 'c_app', 'c_lam'}:
+        return Tree(data, [c for c in children if type(c) is not Token])
+      else: return Tree(data, children)
+  return T().transform(f)
+
+# f = term_parser.parse('x')
+# f = term_parser.parse('((((((x))))))')
+# f = term_parser.parse('1 + 1')
+f = term_parser.parse(r'\x. x x')
+# f = term_parser.parse('(((1 + 1)) + (1))')
 g, root = graph_of(f)
-contract_step(g, root)
-gc(g, root)
-contract_step(g, root)
-gc(g, root)
-contract_step(g, root)
-gc(g, root)
-contract_step(g, root)
-gc(g, root)
+contract(g, root)
+coalesce(g, root)
 pyperclip.copy(viz(g))
 f = forest_of(g, root)
 g, root = graph_of(f)

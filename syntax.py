@@ -413,82 +413,169 @@ def make_parser():
     # irrelevant to the construction of the parse tree, so a post-pass can
     # remove those nodes and yield a tree with no blowup. So the strategy for
     # getting from SPPF to parse tree is as follows:
-    # - contract() removes the above-mentioned sources of blowup from the SPPF.
+    # - contract() and coalesce() remove the above-mentioned sources of blowup
+    #   from the SPPF.
     # - TreeForestTransformer is used to turn the (now hopefully linear) SPPF
     #   into a parse tree with _ambig nodes.
     # - Since we are now working with the SPPF and parse tree manually, we have
     #   to use a Transformer to manually filter out string literals from the
     #   parse tree.
-    def contract_step(f):
-      nonlocal grammar
-      from lark.parsers.earley_forest import ForestTransformer, SymbolNode, PackedNode, TokenNode
-      from lark.grammar import TOKEN_DEFAULT_PRIORITY
-      packed_node_is_singleton = lambda node: (node.left is None, node.right is None) in {(True, False), (False, True)}
-      made_change = False
-      # Technically, because ForestTransformer does a DFS through paths in the
-      # tree, contraction can take exponential time. There should be a way to do
-      # contraction as a linear time graph traversal, but this version seems to
-      # suffice for now and I have run out of time to figure out how to write
-      # the traversal by hand.
-      class T(ForestTransformer):
-        def transform_symbol_node(self, node, data):
-          contractible = lambda s: s.name.startswith('term')
-          can_contract = (
-            contractible(node.s)
-            and len(data) == 1
-            and packed_node_is_singleton(data[0])
-          )
-          if can_contract:
-            nonlocal made_change; made_change = True
-            if data[0].left is None: return data[0].right
-            else: return data[0].left
-          else:
-            s = SymbolNode(node.s, node.start, node.end)
-            for c in data:
+    #
+    # I couldn't figure out how to make the visitors do the linear time
+    # simplification of the graph in a nice way, so for now contract() and
+    # coalesce() convert the forest as an explicit, easier-to-traverse graph and
+    # do the transformations on that.
+    from dataclasses import dataclass
+    @dataclass
+    class ASymbolNode:
+      s: any
+      start: any
+      end: any
+      children: list[int]
+    @dataclass
+    class APackedNode:
+      s: any
+      rule: any
+      start: any
+      children: list[int]
+    @dataclass
+    class ATokenNode:
+      node: any
+    def graph_of(node):
+      from lark.parsers.earley_forest import TokenNode
+      # Map each vertex's id to one of the above classes
+      graph = {}
+      def go_symbol_node(node):
+        nonlocal graph
+        if id(node) in graph: return
+        if isinstance(node, TokenNode):
+          graph[id(node)] = ATokenNode(node)
+        else:
+          graph[id(node)] = ASymbolNode(node.s, node.start, node.end, [id(c) for c in node.children])
+          for c in node.children:
+            go_packed_node(c)
+      def go_packed_node(node):
+        nonlocal graph
+        if id(node) in graph: return
+        graph[id(node)] = APackedNode(node.s, node.rule, node.start, [id(c) for c in [node.left, node.right] if c is not None])
+        if node.left is not None: go_symbol_node(node.left)
+        if node.right is not None: go_symbol_node(node.right)
+      go_symbol_node(node)
+      return (graph, id(node))
+
+    def forest_of(graph, root):
+      from lark.parsers.earley_forest import SymbolNode, PackedNode
+      forest = {}
+      def go(v, parent):
+        nonlocal forest, graph
+        if v in forest: return forest[v]
+        match graph[v]:
+          case ASymbolNode(s, start, end, children):
+            s = SymbolNode(s, start, end)
+            forest[v] = s
+            children = [go(c, s) for c in children]
+            for c in children:
               s.add_family(c.s, c.rule, c.start, c.left, c.right)
             return s
-        def transform_intermediate_node(self, node, data):
-          can_contract = (
-            len(data) == 1
-            and packed_node_is_singleton(data[0])
-          )
-          if can_contract:
-            nonlocal made_change; made_change = True
-            if data[0].left is None: return data[0].right
-            else: return data[0].left
-          else:
-            s = SymbolNode(node.s, node.start, node.end)
-            for c in data:
-              s.add_family(c.s, c.rule, c.start, c.left, c.right)
-            return s
-        def transform_packed_node(self, node, data):
-          match data:
-            case []: return PackedNode(node.parent, node.s, node.rule, node.start, None, None)
-            case [p]: return PackedNode(node.parent, node.s, node.rule, node.start, None, p)
-            case [p, q]: return PackedNode(node.parent, node.s, node.rule, node.start, p, q)
-            case _: assert False
-        def transform_token_node(self, node):
-          # Hack: node is a Token and there's no way to reconstruct a TokenNode
-          # because need access to a TerminalDef but node.type only stores the name
-          # of the terminal. Running contraction twice without this would raise an
-          # error as Token objects do not have .is_intermediate
-          class DummyTerminal:
-            name = node.type
-            pattern = None
-            priority = TOKEN_DEFAULT_PRIORITY
-          TokenNode.is_intermediate = False
-          return TokenNode(node, DummyTerminal)
-      transformer = T()
-      res = transformer.transform(f)
-      return res, made_change
-    # Contracting once can expose further redundant nodes in the tree, so we
-    # need to iterate to a fixed point
-    def contract(f):
-      i = 0
+          case APackedNode(s, rule, start, children):
+            assert parent is not None
+            children = [go(c, None) for c in children]
+            match children:
+              case [p]: return PackedNode(parent, s, rule, start, None, p)
+              case [p, q]: return PackedNode(parent, s, rule, start, p, q)
+              case _: assert False
+          case ATokenNode(node): return node
+      return go(root, None)
+
+    def contract_step(graph, root):
+      visited = set()
+      parents = {}
+      for v, node in graph.items():
+        match node:
+          case APackedNode(_, _, _, children):
+            for i, c in enumerate(children):
+              if c not in parents: parents[c] = set()
+              parents[c].add((v, i))
+      def go(v):
+        if v in visited: return
+        visited.add(v)
+        def join(children):
+          for c in children:
+            go(c)
+        match graph[v]:
+          case ASymbolNode(s, _, _, [w]) if hasattr(s, 'name') and s.name.startswith('term'):
+            match graph[w]:
+              case APackedNode(_, _, _, [c]) if v in parents:
+                for p, i in parents[v]:
+                  graph[p].children[i] = c
+                parents[c] = parents[v]
+              case _: join([w])
+          case ASymbolNode(_, _, _, children): 
+            join(children)
+          case APackedNode(_, _, _, children):
+            for c in children:
+              go(c)
+          case ATokenNode(_): return
+      return go(root)
+
+    def gc(graph, root):
+      marked = set()
+      def go(v):
+        nonlocal marked
+        if v in marked: return
+        marked.add(v)
+        match graph[v]:
+          case ASymbolNode(_, _, _, children):
+            for c in children: go(c)
+          case APackedNode(_, _, _, children):
+            for c in children: go(c)
+          case ATokenNode(_): pass
+      go(root)
+      changed = False
+      for v in tuple(v for v in graph):
+        if v not in marked:
+          del graph[v]
+          changed = True
+      return changed
+
+    def contract(graph, root):
       while True:
-        i += 1
-        f, made_change = contract_step(f)
-        if not made_change: return f
+        contract_step(graph, root)
+        changed = gc(graph, root)
+        if not changed: return
+
+    def coalesce_step(graph, root):
+      visited = set()
+      def go(v):
+        if v in visited: return
+        visited.add(v)
+        match graph[v]:
+          case ASymbolNode(s, _, _, children) if hasattr(s, 'name') and s.name.startswith('term'):
+            term_cases = set()
+            new_children = []
+            for w in children:
+              match graph[w]:
+                case APackedNode(_, _, _, [c]):
+                  if c in term_cases: continue
+                  term_cases.add(c)
+                  new_children.append(w)
+                case _:
+                  new_children.append(w)
+            graph[v].children = new_children
+            for c in new_children: go(c)
+          case ASymbolNode(_, _, _, children):
+            for w in children: go(w)
+          case APackedNode(_, _, _, children):
+            for w in children: go(w)
+          case ATokenNode(_): return
+      return go(root)
+
+    def coalesce(graph, root):
+      while True:
+        coalesce_step(graph, root)
+        changed = gc(graph, root)
+        if not changed: return
+
     def parse_tree(f):
       from lark.parsers.earley_forest import TreeForestTransformer
       return TreeForestTransformer(resolve_ambiguity=False).transform(f)
@@ -506,7 +593,11 @@ def make_parser():
             return Tree(data, [c for c in children if type(c) is not Token])
           else: return Tree(data, children)
       return T().transform(f)
-    forest = contract(forest)
+
+    g, root = graph_of(forest)
+    contract(g, root)
+    coalesce(g, root)
+    forest = forest_of(g, root)
     tree = parse_tree(forest)
     tree = strip_tokens(tree)
     return L.visitors.CollapseAmbiguities().transform(tree)
@@ -932,13 +1023,13 @@ if __name__ == '__main__':
   prec_ge(App.n, Lam.m) # application binds stronger than λ
 
   # str uses \ and condensed . while pretty uses λ
-  id = Lam(F('x', lambda x: x))
-  expect('λx. x', id.simple_names().str('pretty'))
-  expect(r'\x.x', str(id.simple_names()))
+  one = Lam(F('x', lambda x: x))
+  expect('λx. x', one.simple_names().str('pretty'))
+  expect(r'\x.x', str(one.simple_names()))
 
   # Check printing of function applications
-  expect('(λx. x) ((λx. x) (λx. x))', App(id, App(id, id)).simple_names().str('pretty'))
-  expect('(λx. x) (λx. x) (λx. x)', App(App(id, id), id).simple_names().str('pretty'))
+  expect('(λx. x) ((λx. x) (λx. x))', App(one, App(one, one)).simple_names().str('pretty'))
+  expect('(λx. x) (λx. x) (λx. x)', App(App(one, one), one).simple_names().str('pretty'))
 
   # One-step reduction
   class Stuck(Exception): pass
@@ -951,7 +1042,7 @@ if __name__ == '__main__':
         except Stuck: return App(m, step(n))
       case V(x): raise Stuck()
 
-  expect('λx. x', step(App(id, id)).simple_names().str('pretty'))
+  expect('λx. x', step(App(one, one)).simple_names().str('pretty'))
 
   # Check capture-avoiding substitution on \y. (\x. \y. x) y
   k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
@@ -973,7 +1064,7 @@ if __name__ == '__main__':
   expect(omega, global_parser.parse(r'\x. x x'))
   expect(omega, global_parser.parse(r'\x. (x x)'))
   expect(omega2, global_parser.parse(r'(\x. (x x)) ((\x. (x x)))'))
-  expect(App(App(id, id), id), global_parser.parse(r'(\x.x) (\x.x) (\x.x)'))
+  expect(App(App(one, one), one), global_parser.parse(r'(\x.x) (\x.x) (\x.x)'))
   # Even though the production for App is term -> term term, this still has a
   # unique parse because parsing of identifiers always takes the longest match
   expect(V(Name('xy')), global_parser.parse(r'xy'))
@@ -1010,6 +1101,6 @@ if __name__ == '__main__':
 
   # Manually contracting SPPF avoids exponential blowups in the number of parse forests
   expect_unambiguous('(a) (b) (c) (d) (e) (f) (g) (h) (i) (j) (k) (l)')
-  # Still get exponential slowdown because TreeForestVisitor does DFS. In theory
-  # should be possible to contract the graph in linear time.
-  expect_unambiguous('(((1)))')
+  # This example requires the custom graph shenanigans; lark's visitors will
+  # perform DFS and lead to exponential time
+  expect_unambiguous('((((((((1))))))))') 
