@@ -549,7 +549,7 @@ def make_parser():
       return changed
     def contract(graph, root, stats):
       '''Iterate contract_step to a fixed point.'''
-      stats.contract_steps = 0
+      stats.contract_steps = -1
       while True:
         contract_step(graph, root)
         stats.contract_steps += 1
@@ -586,7 +586,7 @@ def make_parser():
       return go(root)
     def coalesce(graph, root, stats):
       '''Iterate coalesce to a fixed point.'''
-      stats.coalesce_steps = 0
+      stats.coalesce_steps = -1
       while True:
         stats.coalesce_steps += 1
         coalesce_step(graph, root)
@@ -641,8 +641,8 @@ def make_parser():
       Returns the parses that stringify to s up to whitespace and extra parens.
       If with_stats=True, additionally return an object containing the following
       statistics measuring how bad the parse was:
-        .contract_steps = number of calls to contract_step
-        .coalesce_steps = number of calls to coalesce_step
+        .contract_steps = number of calls to contract_step that did work
+        .coalesce_steps = number of calls to coalesce_step that did work
         .trees = number of parse trees considered
         .duplicates = number of duplicate parse trees
           (Sometimes inlining ?term_ nonterminals produces duplicates)
@@ -1120,12 +1120,17 @@ if __name__ == '__main__':
     global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x))) (\n.n (\t.\f.t) (\n.\t.\f.f))')
   )
 
-  def expect_unambiguous(s):
+  def parsed_efficiently(s):
     _, stats = global_parser.parse(s, with_stats=True)
-    expect((1, 0), (stats.trees, stats.duplicates))
+    # Parse was completely unambiguous
+    expect(1, stats.trees)
+    expect(0, stats.duplicates)
+    # contract() and coalesce() both converged quickly
+    expect(2, stats.contract_steps)
+    expect(1, stats.coalesce_steps)
 
   # Long input that can't be parsed efficiently without good grammar generation
-  expect_unambiguous(' '.join(r'''
+  parsed_efficiently(' '.join(r'''
     (\Y.\iszero.\add.\z.\s.\cons.\fst.\snd.
       (\pred.
         (\tri. tri (s (s (s z))))
@@ -1142,7 +1147,7 @@ if __name__ == '__main__':
   '''.split()))
 
   # Manually contracting SPPF avoids exponential blowups in the number of parse trees
-  expect_unambiguous('(a) (b) (c) (d) (e) (f) (g) (h) (i) (j) (k) (l)')
+  parsed_efficiently('(a) (b) (c) (d) (e) (f) (g) (h) (i) (j) (k) (l)')
   # This example requires the custom graph shenanigans; lark's visitors will
   # perform DFS and lead to exponential time
-  expect_unambiguous('((((((((1))))))))') 
+  parsed_efficiently('((((((((1))))))))') 
