@@ -45,7 +45,7 @@ class Name:
   def __hash__(self): return hash((self.x, self.n))
   def __eq__(self, other): return self.x == other.x and self.n == other.n
   def __repr__(self): return f'Name({self.x}, {self.n})'
-  def __str__(self): return self.x if self.n is None else f'{self.x}@{self.n}'
+  def __str__(self): return self.x if self.n is None else f'{self.x}_{{{self.n}}}'
   def fresh(self): return Name(self.x, next(global_nats))
   def with_n(self, n): return Name(self.x, n)
 
@@ -977,7 +977,7 @@ if __name__ == '__main__':
   prec_ge(Times.q, Exists.xp)
 
   p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
-  expect('∀ x@0. ∃ y@1. x@0 = y@1', p.str('pretty'))
+  expect('∀ x_{0}. ∃ y_{1}. x_{0} = y_{1}', p.str('pretty'))
   expect('∀ x. ∃ y. x = y', p.simple_names().str('pretty'))
 
   # Equality up to renaming
@@ -1076,9 +1076,9 @@ if __name__ == '__main__':
   k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
   v = lambda y: y
   m = Lam(F('y', lambda y: App(k(y), v(y))))
-  expect('λy. (λx. λy@0. x) y', m.simple_names().str('pretty'))
+  expect('λy. (λx. λy_{0}. x) y', m.simple_names().str('pretty'))
   m = step(m)
-  expect('λy. λy@0. y', m.simple_names().str('pretty'))
+  expect('λy. λy_{0}. y', m.simple_names().str('pretty'))
 
   # Omega Omega -> Omega Omega
   omega = Lam(F('x', lambda x: App(x, x)))
