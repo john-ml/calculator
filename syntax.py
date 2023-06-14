@@ -69,73 +69,78 @@ class V:
 class F:
   '''
   A binding form. There are two ways to construct instances of F:
-  - F('x', lambda x: e[x]) represents a term e with free variable x.
-    Constructs a value F(Name('x', n), e[V(Name('x', n))]) with n fresh.
-  - F(x:Name, e) represents a term e with free variable x.
+  - F('x', lambda x, ...: e[x, ...]) represents a term e with free variables x, ...
+    Constructs a value F(Name('x', n), ..., e[V(Name('x', n)), ...]) with n, ... fresh.
+  - F(x:Name, ..., e) represents a term e with free variables x, ...
     Does not do any freshening.
-  Pattern matching against an instance of F produces [x:Name, e:term] with x fresh.
-  Therefore, while F instances are constructed by F('x', lambda x: e) and F(x, e),
-  they are pattern-matched against as F([x, e]). This is to ensure that the
-  fresh name and its body are extracted together. To support pattern F(x, e) would
-  require two different getters for the name and the body. Depending on the order
+  Pattern matching against an instance of F produces [x:Name, ..., e:term] with x fresh.
+  Therefore, while F instances are constructed by F('x', ..., lambda x, ...: e) and F(x, ..., e),
+  they are pattern-matched against as F([x, ..., e]). This is to ensure that the
+  fresh name and its body are extracted together. To support pattern F(x, ..., e) would
+  require different getters for the names and the body. Depending on the order
   in which the getters are called during pattern matching, this could cause e to
-  be scoped with respect to a stale version of x.
+  be scoped with respect to a stale version of x, ...
   '''
   __match_args__ = ('unwrap',)
-  def __init__(self, x, e=None):
-    fn = type(lambda x: x)
-    if type(x) is str and type(e) is type(lambda x: x):
-      self.x = Name(x).fresh()
-      self.e = e(V(self.x))
-    elif type(x) is Name:
-      self.x = x
+  def __init__(self, *args):
+    *xs, e = args
+    assert len(xs) > 0
+    assert len(set(xs)) == len(xs)
+    if type(xs[0]) is str and type(e) is type(lambda x: x):
+      self.xs = [Name(x).fresh() for x in xs]
+      self.e = e(*map(V, self.xs))
+    elif type(xs[0]) is Name:
+      self.xs = xs
       self.e = e
     else:
-      raise ValueError(f'F({repr(x)}, {repr(e)})')
+      raise ValueError(f'F({repr(xs)}, {repr(e)})')
 
   def __repr__(self):
-    return f'F({repr(self.x)}, {repr(self.e)})'
+    return f'F({repr(self.xs)}, {repr(self.e)})'
   
   def __eq__(self, other, renaming={}):
-    return type(other) is F and self.e.__eq__(other.e, renaming | {self.x: other.x})
+    return type(other) is F and len(self.xs) == len(other.xs) and self.e.__eq__(other.e, renaming | {x: y for x, y in zip(self.xs, other.xs)})
 
   def __str__(self): return self.str(None)
 
   def fresh(self, renaming={}):
-    x = self.x.fresh()
-    e = self.e.fresh(renaming | {self.x: x})
-    return F(x, e)
+    xs = [x.fresh() for x in self.xs]
+    e = self.e.fresh(renaming | {old: new for old, new in zip(self.xs, xs)})
+    return F(*xs, e)
 
   def subst(self, substitution):
-    x = self.x.fresh()
-    e = self.e.subst(substitution | {self.x: V(x)})
-    return F(x, e)
+    xs = [x.fresh() for x in self.xs]
+    e = self.e.subst(substitution | {old: V(new) for old, new in zip(self.xs, xs)})
+    return F(*xs, e)
 
   def simple_names(self, renaming={}, in_use=None):
     if in_use is None: in_use = set(v for _, v in renaming.items())
     banned = in_use | self.fvs()
-    x = (
-      self.x.with_n(None) if self.x.with_n(None) not in banned else
-      next(self.x.with_n(n) for n in nats() if self.x.with_n(n) not in banned)
-    )
-    e = self.e.simple_names(renaming | {self.x: x}, in_use | {x})
-    return F(x, e)
+    xs = []
+    for old_x in self.xs:
+      new_x = (
+        old_x.with_n(None) if old_x.with_n(None) not in banned else
+        next(old_x.with_n(n) for n in nats() if old_x.with_n(n) not in banned)
+      )
+      xs.append(new_x)
+      banned.add(new_x)
+    e = self.e.simple_names(renaming | {old: new for old, new in zip(self.xs, xs)}, in_use | set(xs))
+    return F(*xs, e)
 
   def fvs(self):
-    return self.e.fvs() - {self.x}
+    return self.e.fvs() - set(self.xs)
 
-  def no_parens(self): return F(self.x, self.e.no_parens())
+  def no_parens(self): return F(*self.xs, self.e.no_parens())
 
   def get_unwrap(self):
     e = self.fresh()
-    res = [e.x, e.e]
-    return res
-  def set_unwrap(self): assert False
-  unwrap = property(get_unwrap, set_unwrap)
+    return [*e.xs, e.e]
+  unwrap = property(get_unwrap)
 
   def str(self, mode, left_prec='bot', right_prec='bot', prec_order=global_prec_order):
     dot = '.' if mode is None else '. '
-    return f"{str(self.x)}{dot}{self.e.str(mode, left_prec='bot', right_prec=right_prec, prec_order=prec_order)}"
+    binders = ' '.join(str(x) for x in self.xs)
+    return f"{binders}{dot}{self.e.str(mode, left_prec='bot', right_prec=right_prec, prec_order=prec_order)}"
 
 
 # ---------- Mixfix decorator ----------
@@ -200,6 +205,8 @@ def make_parser():
       | "(" term ")" -> parens
 
       name : CNAME
+      names : CNAMES
+      CNAMES : CNAME (WS CNAME)*
   
       %import common.CNAME
       %import common.ESCAPED_STRING
@@ -308,7 +315,7 @@ def make_parser():
             if v != '': pieces.append(escape(v))
           elif v is F:
             new_lr = make_lr('bot', new_r)
-            pieces.append('name')
+            pieces.append('names')
             pieces.append('"."')
             pieces.append(str_of_lr(new_lr))
             go(new_lr)
@@ -336,6 +343,8 @@ def make_parser():
       | "(" term ")" -> parens
 
       name : CNAME
+      names : CNAMES
+      CNAMES : CNAME (WS CNAME)*
 
       %import common.CNAME
       %import common.ESCAPED_STRING
@@ -367,6 +376,7 @@ def make_parser():
   def make_transformer(constructors):
     class T(L.Transformer):
       def name(self, s): return Name(s[0].value)
+      def names(self, s): return [Name(x) for x in s[0].value.split()]
       def var(self, s): return V(s[0])
       def parens(self, s): return Parens(s[0])
     for name, c in constructors.items():
@@ -378,7 +388,7 @@ def make_parser():
           i = 0
           for v in fields:
             if v is F:
-              new_args.append(F(args[i], args[i+1]))
+              new_args.append(F(*args[i], args[i+1]))
               i += 2
             else:
               new_args.append(args[i])
@@ -601,6 +611,7 @@ def make_parser():
       from lark import Transformer, Tree, Token
       class T(Transformer):
         def name(self, data): return Tree('name', data)
+        def names(self, data): return Tree('names', data)
         def var(self, data): return Tree('var', data)
         def string(self, data): return Tree('string', data)
         def number(self, data): return Tree('number', data)
@@ -1151,3 +1162,7 @@ if __name__ == '__main__':
   # This example requires the custom graph shenanigans; lark's visitors will
   # perform DFS and lead to exponential time
   parsed_efficiently('((((((((1))))))))') 
+
+  # Variable-length binding forms
+  expect(Lam(F('x', 'y', lambda x, y: x)), global_parser.parse(r'\x y.x'))
+  raises(lambda: global_parser.parse(r'\.x')) # length-0 binding forms not allowed
