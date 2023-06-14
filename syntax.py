@@ -1,3 +1,5 @@
+from util import expect, raises
+
 import lark as L
 import networkx as N
 from dataclasses import dataclass
@@ -49,14 +51,25 @@ class Name:
   def fresh(self): return Name(self.x, next(global_nats))
   def with_n(self, n): return Name(self.x, n)
 
-class V:
+# Syntax trees are built from F (defined below) and classes that inherit from Term.
+# Term allows pattern matching against terms in general and recursively manipulating their children.
+class Term:
+  __match_args__ = ('head_constructor', 'children',)
+  head_constructor = property(lambda self: self.__class__)
+  def get_children(self): return [getattr(self, x) for x in self.__class__.__match_args__]
+  def set_children(self, new):
+    for k, v in zip(self.__class__.__match_args__, new):
+      setattr(self, k, v)
+  children = property(get_children, set_children)
+
+class V(Term):
   '''
   An occurrence of a variable name.
   Usually not used to construct variables explicitly; see help(F).
   '''
   __match_args__ = ('x',)
   def __init__(self, x): self.x = x
-  def __eq__(self, other, renaming={}): return renaming[self.x] == other.x if self.x in renaming else self.x == other.x
+  def __eq__(self, other, renaming={}): return type(other) is V and (renaming[self.x] == other.x if self.x in renaming else self.x == other.x)
   def __repr__(self): return f'V({repr(self.x)})'
   def __str__(self): return self.str(None)
   def fresh(self, renaming={}): return V(renaming[self.x]) if self.x in renaming else self
@@ -869,6 +882,8 @@ def mixfix(c):
   global_parser.add_production((c, [(make_prec(k), v if type(v) is not Str else v.s) for k, v in annotations.items()]))
   return c
 
+def s(s, with_stats=False): return global_parser.parse(s, with_stats=with_stats)
+
 # ---------- Examples ----------
 
 if __name__ == '__main__':
@@ -882,20 +897,20 @@ if __name__ == '__main__':
   #   it out just to show you can)
 
   @mixfix
-  class Top:
+  class Top(Term):
     s: Str('1')
   prec_top(Top)
   prec_top(Top.s)
 
   @mixfix
-  class Times:
+  class Times(Term):
     p: any
     times: Str('*', pretty=' * ')
     q: any
   prec_ge(Times, Times.times) # right associative
 
   @mixfix
-  class Plus:
+  class Plus(Term):
     p: any
     plus: Str('+', pretty=' + ')
     q: any
@@ -903,22 +918,13 @@ if __name__ == '__main__':
   prec_ges([(Times, Plus), (Times.q, Plus.p), (Times.q, Plus.q)]) # * takes precedence over +
 
   @mixfix
-  class Pow:
+  class Pow(Term):
     p: any
     to: Str('->', pretty=' -> ')
     q: any
   prec_ge(Pow, Pow.to) # right associative
   prec_ges([(Plus, Pow), (Plus.q, Pow.p)]) # + takes precedence on left of ->
   # Note: by transitivity, also get that * takes precedence on left of ->.
-
-  def expect(want, have):
-    if want != have:
-      raise Exception(f'\nWant: {want}\nHave: {have}')
-  def raises(thunk):
-    try:
-      v = thunk()
-      raise ValueError(f'Instead of exception got {v}')
-    except: pass
 
   # 1 requires no bracketing
   expect('1 * 1', Times(Top(), Top()).str('pretty'))
@@ -971,16 +977,16 @@ if __name__ == '__main__':
   # Example 2: extending the language with quantifiers
 
   @mixfix
-  class Forall:
+  class Forall(Term):
     forall: Str('forall ', pretty='∀ ')
     xp: F
   @mixfix
-  class Exists:
+  class Exists(Term):
     forall: Str('exists ', pretty='∃ ')
     xp: F
   prec_ges([(Forall.xp, Exists.xp), (Exists.xp, Forall.xp)])
   @mixfix
-  class Eq:
+  class Eq(Term):
     m: any
     eq: Str('=', pretty=' = ')
     n: any
@@ -1046,123 +1052,3 @@ if __name__ == '__main__':
   expect('∀ x. ∀ y. ∃ z. (y = y) * (x = y) * (z = z)', p.simple_names().str('pretty'))
   p = simplify(p)
   expect('∀ x. ∀ y. x = y', p.simple_names().str('pretty'))
-
-  # Example 4: untyped LC
-
-  @mixfix
-  class Lam:
-    lam: Str('\\', pretty='λ')
-    m: F
-  @mixfix
-  class App:
-    m: any
-    app: Str(' ')
-    n: any
-  prec_ge(App.n, App.m) # left-associative
-  prec_ge(App.n, Lam.m) # application binds stronger than λ
-
-  # str uses \ and condensed . while pretty uses λ
-  one = Lam(F('x', lambda x: x))
-  expect('λx. x', one.simple_names().str('pretty'))
-  expect(r'\x.x', str(one.simple_names()))
-
-  # Check printing of function applications
-  expect('(λx. x) ((λx. x) (λx. x))', App(one, App(one, one)).simple_names().str('pretty'))
-  expect('(λx. x) (λx. x) (λx. x)', App(App(one, one), one).simple_names().str('pretty'))
-
-  # One-step reduction
-  class Stuck(Exception): pass
-  def step(m):
-    match m:
-      case Lam(F([x, m])): return Lam(F(x, step(m)))
-      case App(Lam(F([x, m])), n): return m.subst({x: n})
-      case App(m, n):
-        try: return App(step(m), n)
-        except Stuck: return App(m, step(n))
-      case V(x): raise Stuck()
-
-  expect('λx. x', step(App(one, one)).simple_names().str('pretty'))
-
-  # Check capture-avoiding substitution on \y. (\x. \y. x) y
-  k = lambda y: Lam(F('x', lambda x: Lam(F('y', lambda y: x))))
-  v = lambda y: y
-  m = Lam(F('y', lambda y: App(k(y), v(y))))
-  expect('λy. (λx. λy_{0}. x) y', m.simple_names().str('pretty'))
-  m = step(m)
-  expect('λy. λy_{0}. y', m.simple_names().str('pretty'))
-
-  # Omega Omega -> Omega Omega
-  omega = Lam(F('x', lambda x: App(x, x)))
-  expect('λx. x x', omega.simple_names().str('pretty'))
-  omega2 = App(omega, omega)
-  expect('(λx. x x) (λx. x x)', omega2.simple_names().str('pretty'))
-  omega2 = step(omega2)
-  expect('(λx. x x) (λx. x x)', omega2.simple_names().str('pretty'))
-
-  # Parsing
-  expect(omega, global_parser.parse(r'\x. x x'))
-  expect(omega, global_parser.parse(r'\x. (x x)'))
-  expect(omega2, global_parser.parse(r'(\x. (x x)) ((\x. (x x)))'))
-  expect(App(App(one, one), one), global_parser.parse(r'(\x.x) (\x.x) (\x.x)'))
-  # Even though the production for App is term -> term term, this still has a
-  # unique parse because parsing of identifiers always takes the longest match
-  expect(V(Name('xy')), global_parser.parse(r'xy'))
-
-  # Recognizes the outer parens as superfluous and spaces unnecessary
-  expect(
-    Lam(F('f', lambda f: App(Lam(F('x', lambda x: x)), f))),
-    global_parser.parse(r'(\f.(\x.x) f)')
-  )
-
-  # Some longer parses (used to lead to exponential blowup; now fine because
-  # parsing of F is hard-coded to expect a name in binding position)
-  y = Lam(F('f', lambda f: App(
-    Lam(F('x', lambda x: App(f, App(x, x)))),
-    Lam(F('x', lambda x: App(f, App(x, x)))))
-  ))
-  snd_y = App(Lam(F('y', lambda y: Lam(F('p', lambda p: p)))), y)
-  is_zero = Lam(F('n', lambda n: App(
-    App(n, Lam(F('t', lambda t: Lam(F('f', lambda f: t))))),
-    Lam(F('n', lambda n: Lam(F('t', lambda t: Lam(F('f', lambda f: f)))))))
-  ))
-  expect(snd_y, global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x)))'))
-  expect(
-    App(snd_y, is_zero),
-    global_parser.parse(r'(\y.\p.p) (\f.(\x.f (x x)) (\x.f (x x))) (\n.n (\t.\f.t) (\n.\t.\f.f))')
-  )
-
-  def parsed_efficiently(s):
-    _, stats = global_parser.parse(s, with_stats=True)
-    # Parse was completely unambiguous
-    expect(1, stats.trees)
-    expect(0, stats.duplicates)
-    # contract() and coalesce() both converged quickly
-    expect(2, stats.contract_steps)
-    expect(1, stats.coalesce_steps)
-
-  # Long input that can't be parsed efficiently without good grammar generation
-  parsed_efficiently(' '.join(r'''
-    (\Y.\iszero.\add.\z.\s.\cons.\fst.\snd.
-      (\pred.
-        (\tri. tri (s (s (s z))))
-        (Y (\tri.\n.iszero n z (add n (tri (pred n))))))
-      (\n.fst (n (\p. cons (snd p) (s (snd p))) (cons z z))))
-    (\f.(\x.(f (x x))) (\x.(f (x x))))
-    (\n.n (\n.\t.\f.f) (\t.\f.t))
-    (\m.\n.\s.\z.m s (n s z))
-    (\s.\z.z)
-    (\n.\s.\z.s (n s z))
-    (\x.\y.\f.f x y)
-    (\p.p (\x.\y.x))
-    (\p.p (\x.\y.y))
-  '''.split()))
-
-  # Manually contracting SPPF avoids exponential blowups in the number of parse trees
-  parsed_efficiently('(a) (b) (c) (d) (e) (f) (g) (h) (i) (j) (k) (l)')
-  # This example requires the custom graph shenanigans; lark's visitors will
-  # perform DFS and lead to exponential time
-  parsed_efficiently('((((((((1))))))))') 
-
-  # Variable-length binding forms
-  expect(Lam(F('x', 'y', lambda x, y: x)), global_parser.parse(r'\x y.x'))
-  raises(lambda: global_parser.parse(r'\.x')) # length-0 binding forms not allowed
