@@ -19,6 +19,10 @@ def prec_ges(pqs):
   for p, q in pqs:
     prec_ge(p, q)
   parser_up_to_date = False
+def prec_pairwise_ge(ps, qs):
+  for p in ps:
+    for q in qs:
+      prec_ge(p, q)
 def prec_bot(p):
   global_prec_order.add_bot(to_prec(p))
   parser_up_to_date = False

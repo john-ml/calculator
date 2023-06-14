@@ -34,6 +34,7 @@ def parstep(m):
     case App(Lam(F([x, m])), n): return parstep(m).subst({x: parstep(n)})
     case App(m, n): return App(parstep(m), parstep(n))
     case V(_): return m
+    case F([*xs, m]): return F(xs, parstep(m))
     case Term(C, subterms): return C(*map(parstep, subterms))
 
 if __name__ == '__main__':
@@ -144,16 +145,8 @@ if __name__ == '__main__':
     comma: Str(',')
     n: Term
     r: Str(')', pretty='\\rangle ')
-  S.prec_ge(App.n, Pair.l)
-  S.prec_ge(App.n, Pair.m)
-  S.prec_ge(App.n, Pair.comma)
-  S.prec_ge(App.n, Pair.n)
-  S.prec_ge(App.n, Pair.r)
-  S.prec_ge(App, Pair.l)
-  S.prec_ge(App, Pair.m)
-  S.prec_ge(App, Pair.comma)
-  S.prec_ge(App, Pair.n)
-  S.prec_ge(App, Pair.r)
+  S.prec_pairwise_ge([App.n], [Pair.l, Pair.m, Pair.comma, Pair.n, Pair.r])
+  S.prec_pairwise_ge([App], [Pair.l, Pair.m, Pair.comma, Pair.n, Pair.r])
   
   expect(Pair(V(Name('x')), V(Name('y'))), S.s('(x, y)'))
   expect(Pair(V(Name('x')), V(Name('y'))), S.s('(((((((((x, y)))))))))'))
