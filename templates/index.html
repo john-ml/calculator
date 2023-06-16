@@ -47,6 +47,7 @@
     });
   </script>
   <script>
+    // Unused for now
     let history = [];
     let history_cursor = 0;
     const inputkeydown = (event) => {
@@ -99,13 +100,37 @@
       }
     }
   </script>
+  <script>
+    const keydown = (event) => {
+      console.log(event.key);
+      switch (event.key) {
+        default: {
+          fetch('input', {
+            method: 'POST',
+            headers: {'Accept': 'application/json', 'Content-Type': 'application/json'},
+            body: event.key,
+          }).then(v => {
+            console.log('Got response', v);
+            (async () => {
+              let html = '';
+              for await (const chunk of v.body)
+                html += new TextDecoder().decode(chunk);
+              console.log('Setting body to ', html);
+              document.body.innerHTML = html;
+              render(document.body);
+            })();
+          });
+        }
+      }
+    }
+  </script>
 </head>
-<body>
-  <div id="scroller">
+<body onkeydown="keydown(event)">
+  <!-- <div id="scroller">
     <div id="padding" style="height:100vh"></div>
     <div id="log"></div>
     <div contenteditable autofocus id="input" class="input" onkeydown="inputkeydown(event)"></div>
     <div id="anchor"></div>
   </div>
-  <script>window.scrollTo(0, document.body.scrollHeight);</script>
+  <script>window.scrollTo(0, document.body.scrollHeight);</script> -->
 </body>
