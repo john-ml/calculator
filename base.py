@@ -27,15 +27,15 @@ def step(m):
     case V(x): raise Stuck()
     case _: raise ValueError(m)
 
-# Maximal parallel reduction
-def parstep(m):
+# Complete development
+def parsteps(m):
   match m:
-    case Lam(F([x, m])): return Lam(F(x, parstep(m)))
-    case App(Lam(F([x, m])), n): return parstep(m).subst({x: parstep(n)})
-    case App(m, n): return App(parstep(m), parstep(n))
+    case Lam(F([x, m])): return Lam(F(x, parsteps(m)))
+    case App(Lam(F([x, m])), n): return parsteps(m).subst({x: parsteps(n)})
+    case App(m, n): return App(parsteps(m), parsteps(n))
     case V(_): return m
-    case F([*xs, m]): return F(xs, parstep(m))
-    case Term(C, subterms): return C(*map(parstep, subterms))
+    case F([*xs, m]): return F(xs, parsteps(m))
+    case Term(C, subterms): return C(*map(parsteps, subterms))
 
 if __name__ == '__main__':
 
@@ -150,4 +150,4 @@ if __name__ == '__main__':
   
   expect(Pair(V(Name('x')), V(Name('y'))), S.s('(x, y)'))
   expect(Pair(V(Name('x')), V(Name('y'))), S.s('(((((((((x, y)))))))))'))
-  expect(Pair(V(Name('y')), V(Name('x'))), parstep(S.s(r'((\x. x) y, (\y. y) x)')))
+  expect(Pair(V(Name('y')), V(Name('x'))), parsteps(S.s(r'((\x. x) y, (\y. y) x)')))
