@@ -93,8 +93,41 @@ def parsteps(m):
     case App(Lam(F([x, m])), n): return parsteps(m).subst({x: parsteps(n)})
     case App(m, n): return App(parsteps(m), parsteps(n))
     case V(_): return m
-    case F([*xs, m]): return F(xs, parsteps(m))
+    case F([*xs, m]): return F(*xs, parsteps(m))
     case Term(C, subterms): return C(*map(parsteps, subterms))
+
+# ---------- Navigation ----------
+
+@mixfix
+class Cursor:
+  l: Str('[', tex=r'{\color{red}', pretty='[')
+  m: Term
+  r: Str(']', tex=r'}', pretty=']')
+S.prec_top(Cursor)
+S.prec_bot(Cursor.l)
+S.prec_bot(Cursor.m)
+S.prec_top(Cursor.r)
+
+def move_down(m):
+  match m:
+    case V(_): return m
+    case F([*xs, m]): return F(*xs, m)
+    case Cursor(Term(C, [m, *ms])): return C(Cursor(m), *ms)
+    case Term(C, ms): return C(*map(move_down, ms))
+
+def move_right(m):
+  def find_cursor(ms):
+    try:
+      i = next(i for i, m in enumerate(ms) if type(m) is Cursor)
+      return ms[:i], ms[i].m, ms[i+1:]
+    except StopIteration: return None
+  match m:
+    case V(_): return m
+    case F([*xs, m]): return F(*xs, m)
+    case Term(C, ms):
+      match find_cursor(ms):
+        case (l, m, [n, *r]): return C(*l, m, Cursor(n), *r)
+        case None: return C(*map(move_right, ms))
 
 if __name__ == '__main__':
 
@@ -277,3 +310,10 @@ if __name__ == '__main__':
 
   expect(Lam(F('x', lambda x: Lam(F('y', lambda y: y)))), desugar(S.s(r'\x y. y')))
   parsed_efficiently(r'\x y. y')
+
+  # ---------- Navigation ----------
+
+  p = Cursor(S.s(r'x = y /\ y = z'))
+  p = move_down(p)
+  p = move_right(p)
+  expect('x = y ∧ [y = z]', p.str('pretty'))
