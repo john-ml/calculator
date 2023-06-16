@@ -15,6 +15,15 @@ class App(Term):
 S.prec_ge(App.n, App.m) # left-associative
 S.prec_ge(App.n, Lam.m) # application binds stronger than λ
 
+# Desugar variable-length binders to single binders
+def desugar(m):
+  match m:
+    case Lam(F([x, m])): return Lam(F(x, desugar(m)))
+    case Lam(F([x, y, *ys, m])): return Lam(F(x, desugar(Lam(F(y, *ys, m)))))
+    case V(_): return m
+    case Term(C, ms): return C(*map(desugar, ms))
+    case _: assert False
+
 # One-step reduction, defined strictly on lambda-terms
 class Stuck(Exception): pass
 def step(m):
@@ -151,3 +160,5 @@ if __name__ == '__main__':
   expect(Pair(V(Name('x')), V(Name('y'))), S.s('(x, y)'))
   expect(Pair(V(Name('x')), V(Name('y'))), S.s('(((((((((x, y)))))))))'))
   expect(Pair(V(Name('y')), V(Name('x'))), parsteps(S.s(r'((\x. x) y, (\y. y) x)')))
+
+  expect(Lam(F('x', lambda x: Lam(F('y', lambda y: y)))), desugar(S.s(r'\x y. y')))
