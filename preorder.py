@@ -61,6 +61,9 @@ class Preorder:
     '''Check whether x <= y in the poset.'''
     self.make_closure()
     return self.closure.has_edge(x, y)
+  def ge(self, x, y):
+    '''Check whether x >= y in the poset.'''
+    return self.le(y, x)
 
 if __name__ == '__main__':
   g = N.DiGraph([(0, 1), (1, 0), (2, 2), (0, 3), (3, 4)])

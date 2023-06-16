@@ -15,20 +15,20 @@ def add_prec(p):
 def prec_ge(p, q):
   global_prec_order.add_le(to_prec(q), to_prec(p))
   parser_up_to_date = False
-def prec_ges(pqs):
-  for p, q in pqs:
-    prec_ge(p, q)
-  parser_up_to_date = False
-def prec_pairwise_ge(ps, qs):
-  for p in ps:
-    for q in qs:
-      prec_ge(p, q)
 def prec_bot(p):
   global_prec_order.add_bot(to_prec(p))
   parser_up_to_date = False
 def prec_top(p):
   global_prec_order.add_top(to_prec(p))
   parser_up_to_date = False
+
+def prec_ges(pqs):
+  for p, q in pqs:
+    prec_ge(p, q)
+def prec_pairwise_ge(ps, qs):
+  for p in ps:
+    for q in qs:
+      prec_ge(p, q)
 
 # ---------- Name binding ----------
 
@@ -977,82 +977,3 @@ if __name__ == '__main__':
   expect(Plus(Top(), Plus(Top(), Top())), global_parser.parse('1+1+1'))
   expect(Plus(Times(Top(), Top()), Top()), global_parser.parse('1*1+1'))
   expect(Plus(Times(Top(), Top()), Top()), global_parser.parse('1  *1+     1'))
-
-  # Example 2: extending the language with quantifiers
-
-  @mixfix
-  class Forall(Term):
-    forall: Str('forall ', pretty='∀ ')
-    xp: F
-  @mixfix
-  class Exists(Term):
-    forall: Str('exists ', pretty='∃ ')
-    xp: F
-  prec_ges([(Forall.xp, Exists.xp), (Exists.xp, Forall.xp)])
-  @mixfix
-  class Eq(Term):
-    m: any
-    eq: Str('=', pretty=' = ')
-    n: any
-  prec_ge(Eq.n, Exists.xp) # by transitivity, Eq.n >= Forall.xp
-  prec_ge(Times.q, Exists.xp)
-
-  p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
-  expect('∀ x_{0}. ∃ y_{1}. x_{0} = y_{1}', p.str('pretty'))
-  expect('∀ x. ∃ y. x = y', p.simple_names().str('pretty'))
-
-  # Equality up to renaming
-  mxy = Forall(F('x', lambda x: Forall(F('y', lambda y: Eq(x, y)))))
-  muv = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(u, v)))))
-  muv_flip = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(v, u)))))
-  expect(True, mxy == muv)
-  expect(False, mxy == muv_flip)
-
-  # Parsing of C identifiers as variable names
-  expect(V(Name('a')), global_parser.parse('a'))
-  expect(V(Name('snake_case123')), global_parser.parse('snake_case123'))
-  expect(V(Name('_abc')), global_parser.parse('_abc'))
-
-  # Parsing of quantified formulas
-  # Note: tests are happening up to renaming of bound variables, because
-  # F.__eq__ works up to renaming
-  expect(Forall(F('x', lambda x: x)), global_parser.parse('forall x. x'))
-  expect(Exists(F('x', lambda x: x)), global_parser.parse('exists x. x'))
-  expect(Forall(F('p', lambda p: Times(p, p))), global_parser.parse('forall x. x * x'))
-  expect(Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y))))), global_parser.parse('forall x. exists y. x = y'))
-  expect(
-    Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Eq(x, y)))))))), 
-    global_parser.parse('forall x. forall y. exists z. (y = y) * (x = y)')
-  )
-  raises(lambda: global_parser.parse('forall x. forall y. exists z. (y = y) * x = y')) # missing parens around x = y
-
-  # Example 3: pattern matching on ABTs
-
-  def simplify(p):
-    match p:
-      case Eq(m, n): return Top() if m == n else Eq(simplify(m), simplify(n))
-      case V(x): return V(x)
-      case Forall(F([x, p])):
-        p = simplify(p)
-        if x not in p.fvs(): return p
-        else: return Forall(F(x, p))
-      case Exists(F([x, p])):
-        p = simplify(p)
-        if x not in p.fvs(): return p
-        else: return Exists(F(x, p))
-      case Plus(p, q): return Plus(simplify(p), simplify(q))
-      case Times(p, q):
-        match simplify(p), simplify(q):
-          case Top(), Top(): return Top()
-          case Top(), q: return q
-          case p, Top(): return p
-          case p, q: return Times(p, q)
-      case Pow(p, q): return Pow(simplify(p), simplify(q))
-      case _:
-        assert False
-
-  p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: Times(Eq(y, y), Times(Eq(x, y), Eq(z, z)))))))))
-  expect(set(), p.fvs())
-  expect('∀ x. ∀ y. ∃ z. (y = y) * (x = y) * (z = z)', p.simple_names().str('pretty'))
-  p = simplify(p)
-  expect('∀ x. ∀ y. x = y', p.simple_names().str('pretty'))

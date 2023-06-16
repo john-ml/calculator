@@ -2,16 +2,66 @@ from util import expect, raises
 import syntax as S
 from syntax import F, V, Name, Str, mixfix, Term
 
+# ---------- Logic ----------
+
+@mixfix
+class Top(Term):
+  s: Str('true', tex=r'\top ', pretty='T')
+S.prec_top(Top)
+S.prec_top(Top.s)
+
+@mixfix
+class And(Term):
+  p: Term
+  land: Str('/\\', tex=r'\land ', pretty=' ∧ ')
+  q: Term
+S.prec_ge(And, And.land) # right associative
+
+@mixfix
+class Or(Term):
+  p: Term
+  lor: Str('\\/', tex=r'\lor ', pretty=' ∨ ')
+  q: Term
+S.prec_ge(Or, Or.lor) # right associative
+S.prec_pairwise_ge([And, And.p, And.land, And.q], [Or, Or.p, Or.lor, Or.q])
+
+@mixfix
+class To(Term):
+  p: Term
+  to: Str('->', tex='\to ', pretty=' → ')
+  q: Term
+S.prec_ge(To, To.to) # right associative
+S.prec_ges([(Or, To), (Or.q, To.p), (Or, To.to), (Or.q, To.q)]) # \/ takes precedence over ->
+# Note: by transitivity, also get that /\ takes precedence over ->.
+
+@mixfix
+class Forall(Term):
+  forall: Str('forall ', tex=r'\forall ', pretty='∀ ')
+  xp: F
+@mixfix
+class Exists(Term):
+  exists: Str('exists ', tex=r'\exists ', pretty='∃ ')
+  xp: F
+S.prec_ges([(Forall.xp, Exists.xp), (Exists.xp, Forall.xp)])
+@mixfix
+class Eq(Term):
+  m: Term
+  eq: Str('=', pretty=' = ')
+  n: Term
+S.prec_pairwise_ge([Eq], [And, And.land, Exists.exists])
+S.prec_pairwise_ge([Eq.n], [And.p, And.q, Exists.xp])
+S.prec_ge(And.q, Exists.xp)
+
 # Lambda calculus
 @mixfix
 class Lam(Term):
-  lam: Str('\\', pretty='λ')
+  lam: Str('\\', tex=r'\lambda ', pretty='λ')
   m: F
 @mixfix
 class App(Term):
-  m: any
+  m: Term
   app: Str(' ')
-  n: any
+  n: Term
 S.prec_ge(App.n, App.m) # left-associative
 S.prec_ge(App.n, Lam.m) # application binds stronger than λ
 
@@ -47,6 +97,69 @@ def parsteps(m):
     case Term(C, subterms): return C(*map(parsteps, subterms))
 
 if __name__ == '__main__':
+
+  # ---------- Logic ----------
+
+  p = Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y)))))
+  expect('∀ x_{0}. ∃ y_{1}. x_{0} = y_{1}', p.str('pretty'))
+  expect('∀ x. ∃ y. x = y', p.simple_names().str('pretty'))
+
+  # Equality up to renaming
+  mxy = Forall(F('x', lambda x: Forall(F('y', lambda y: Eq(x, y)))))
+  muv = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(u, v)))))
+  muv_flip = Forall(F('u', lambda u: Forall(F('v', lambda v: Eq(v, u)))))
+  expect(True, mxy == muv)
+  expect(False, mxy == muv_flip)
+
+  # Parsing of C identifiers as variable names
+  expect(V(Name('a')), S.s('a'))
+  expect(V(Name('snake_case123')), S.s('snake_case123'))
+  expect(V(Name('_abc')), S.s('_abc'))
+
+  expect('x = y ∨ z = w', S.s('x = y \\/ z = w').str('pretty'))
+
+  # Parsing of quantified formulas
+  # Note: tests are happening up to renaming of bound variables, because
+  # F.__eq__ works up to renaming
+  expect(Forall(F('x', lambda x: x)), S.s('forall x. x'))
+  expect(Exists(F('x', lambda x: x)), S.s('exists x. x'))
+  expect(Forall(F('p', lambda p: And(p, p))), S.s(r'forall x. x /\ x'))
+  expect(Forall(F('x', lambda x: Exists(F('y', lambda y: Eq(x, y))))), S.s('forall x. exists y. x = y'))
+  expect(
+    Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: And(Eq(y, y), Eq(x, y)))))))), 
+    S.s(r'forall x. forall y. exists z. y = y /\ x = y')
+  )
+
+  def simplify(p):
+    match p:
+      case Eq(m, n): return Top() if m == n else Eq(simplify(m), simplify(n))
+      case V(x): return V(x)
+      case Forall(F([x, p])):
+        p = simplify(p)
+        if x not in p.fvs(): return p
+        else: return Forall(F(x, p))
+      case Exists(F([x, p])):
+        p = simplify(p)
+        if x not in p.fvs(): return p
+        else: return Exists(F(x, p))
+      case Or(p, q): return Or(simplify(p), simplify(q))
+      case And(p, q):
+        match simplify(p), simplify(q):
+          case Top(), Top(): return Top()
+          case Top(), q: return q
+          case p, Top(): return p
+          case p, q: return And(p, q)
+      case To(p, q): return To(simplify(p), simplify(q))
+      case _:
+        assert False
+
+  p = Forall(F('x', lambda x: Forall(F('y', lambda y: Exists(F('z', lambda z: And(Eq(y, y), And(Eq(x, y), Eq(z, z)))))))))
+  expect(set(), p.fvs())
+  expect('∀ x. ∀ y. ∃ z. y = y ∧ x = y ∧ z = z', p.simple_names().str('pretty'))
+  p = simplify(p)
+  expect('∀ x. ∀ y. x = y', p.simple_names().str('pretty'))
+
+  # ---------- Lambda calculus ----------
 
   # str uses \ and condensed . while pretty uses λ
   one = Lam(F('x', lambda x: x))
@@ -159,6 +272,8 @@ if __name__ == '__main__':
   
   expect(Pair(V(Name('x')), V(Name('y'))), S.s('(x, y)'))
   expect(Pair(V(Name('x')), V(Name('y'))), S.s('(((((((((x, y)))))))))'))
+  parsed_efficiently('(((((((((x, y)))))))))')
   expect(Pair(V(Name('y')), V(Name('x'))), parsteps(S.s(r'((\x. x) y, (\y. y) x)')))
 
   expect(Lam(F('x', lambda x: Lam(F('y', lambda y: y)))), desugar(S.s(r'\x y. y')))
+  parsed_efficiently(r'\x y. y')
