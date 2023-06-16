@@ -55,7 +55,7 @@ class Name:
   def fresh(self): return Name(self.x, next(global_nats))
   def with_n(self, n): return Name(self.x, n)
 
-# Syntax trees are built from F (defined below) and classes that inherit from Term.
+# Syntax trees are built from V, F (defined below) and classes that inherit from Term.
 # Term allows pattern matching against terms in general and recursively manipulating their children.
 class Term:
   __match_args__ = ('head_constructor', 'children',)
@@ -66,7 +66,7 @@ class Term:
       setattr(self, k, v)
   children = property(get_children, set_children)
 
-class V(Term):
+class V:
   '''
   An occurrence of a variable name.
   Usually not used to construct variables explicitly; see help(F).

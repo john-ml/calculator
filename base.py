@@ -113,21 +113,43 @@ def move_down(m):
     case V(_): return m
     case F([*xs, m]): return F(*xs, m)
     case Cursor(Term(C, [m, *ms])): return C(Cursor(m), *ms)
+    case Cursor(_): return m
     case Term(C, ms): return C(*map(move_down, ms))
 
-def move_right(m):
-  def find_cursor(ms):
-    try:
-      i = next(i for i, m in enumerate(ms) if type(m) is Cursor)
-      return ms[:i], ms[i].m, ms[i+1:]
-    except StopIteration: return None
+def find_cursor_in_list(ms):
+  try:
+    i = next(i for i, m in enumerate(ms) if type(m) is Cursor)
+    return ms[:i], ms[i].m, ms[i+1:]
+  except StopIteration: return None
+
+def move_left(m):
   match m:
     case V(_): return m
-    case F([*xs, m]): return F(*xs, m)
+    case F([*xs, m]): return F(*xs, move_left(m))
     case Term(C, ms):
-      match find_cursor(ms):
+      match find_cursor_in_list(ms):
+        case ([*l, m], n, r): return C(*l, Cursor(m), n, *r)
+        case (_, _, _): return m
+        case None: return C(*map(move_left, ms))
+
+def move_right(m):
+  match m:
+    case V(_): return m
+    case F([*xs, m]): return F(*xs, move_right(m))
+    case Term(C, ms):
+      match find_cursor_in_list(ms):
         case (l, m, [n, *r]): return C(*l, m, Cursor(n), *r)
+        case (_, _, _): return m
         case None: return C(*map(move_right, ms))
+
+def move_up(m):
+  match m:
+    case V(_): return m
+    case F([*xs, m]): return F(*xs, move_up(m))
+    case Term(C, ms):
+      match find_cursor_in_list(ms):
+        case (l, m, r): return Cursor(C(*l, m, *r))
+        case None: return C(*map(move_up, ms))
 
 if __name__ == '__main__':
 
@@ -313,7 +335,37 @@ if __name__ == '__main__':
 
   # ---------- Navigation ----------
 
-  p = Cursor(S.s(r'x = y /\ y = z'))
+  p = Cursor(S.s(r'x = y /\ y = z /\ z = w'))
+  expect('[x = y ∧ y = z ∧ z = w]', p.str('pretty'))
   p = move_down(p)
+  expect('[x = y] ∧ y = z ∧ z = w', p.str('pretty'))
   p = move_right(p)
-  expect('x = y ∧ [y = z]', p.str('pretty'))
+  expect('x = y ∧ [y = z ∧ z = w]', p.str('pretty'))
+  p = move_right(p)
+  expect('x = y ∧ [y = z ∧ z = w]', p.str('pretty'))
+  p = move_left(p)
+  expect('[x = y] ∧ y = z ∧ z = w', p.str('pretty'))
+  p = move_down(p)
+  expect('[x] = y ∧ y = z ∧ z = w', p.str('pretty'))
+  p = move_down(p)
+  expect('[x] = y ∧ y = z ∧ z = w', p.str('pretty'))
+  p = move_left(p)
+  expect('[x] = y ∧ y = z ∧ z = w', p.str('pretty'))
+  p = move_right(p)
+  expect('x = [y] ∧ y = z ∧ z = w', p.str('pretty'))
+  p = move_right(p)
+  expect('x = [y] ∧ y = z ∧ z = w', p.str('pretty'))
+  p = move_up(p)
+  expect('[x = y] ∧ y = z ∧ z = w', p.str('pretty'))
+  p = move_right(p)
+  p = move_down(p)
+  expect('x = y ∧ [y = z] ∧ z = w', p.str('pretty'))
+  p = move_right(p)
+  expect('x = y ∧ y = z ∧ [z = w]', p.str('pretty'))
+  p = move_left(p)
+  expect('x = y ∧ [y = z] ∧ z = w', p.str('pretty'))
+  p = move_left(p)
+  expect('x = y ∧ [y = z] ∧ z = w', p.str('pretty'))
+  p = move_up(p)
+  p = move_up(p)
+  expect('[x = y ∧ y = z ∧ z = w]', p.str('pretty'))
